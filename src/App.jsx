@@ -552,8 +552,16 @@ const headerProgressFill = {
   transition: "0.4s",
   borderRadius: 10
 };
-  return (
-    <div style={container}>
+  <div
+  style={{
+    minHeight: "100vh",
+    width: "100%",
+    maxWidth: "100vw",
+    boxSizing: "border-box",
+    overflowX: "hidden",
+    padding: 16
+  }}
+>
       <div style={headerBox}>
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
     <div>
@@ -1111,5 +1119,5 @@ const headerProgressFill = {
         </>
       )}
     </div>
-  );
+  ;
 }
