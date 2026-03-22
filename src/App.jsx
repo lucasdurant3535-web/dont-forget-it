@@ -441,16 +441,19 @@ function getWeeklyData() {
   }
 
   const container = {
-    maxWidth: 420,
-    margin: "0 auto",
-    padding: 20,
-    fontFamily: "sans-serif",
-    background: dark
-  ? "linear-gradient(180deg, #0f0f14, #1a1a22)"
-  : "#f2f2f2",
-    color: dark ? "#fff" : "#000",
-    minHeight: "100vh"
-  };
+  width: "100%",
+  maxWidth: 420,
+  margin: "0 auto",
+  padding: 20,
+  boxSizing: "border-box",
+  overflowX: "hidden",
+  fontFamily: "sans-serif",
+  background: dark
+    ? "linear-gradient(180deg, #0f0f14, #1a1a22)"
+    : "#f2f2f2",
+  color: dark ? "#fff" : "#000",
+  minHeight: "100vh"
+};
 
   const box = {
     background: dark ? "#1e1e1e" : "#fff",
