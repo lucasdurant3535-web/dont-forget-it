@@ -491,27 +491,30 @@ flipSound.src = "/flip.mp3";
     fontSize: 16
   };
     const tabsBar = {
-    display: "flex",
-    gap: 10,
-    padding: 10,
-    borderRadius: 16,
-    background: dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)",
-    border: dark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.06)",
-    marginBottom: 16
-  };
+  display: "flex",
+  gap: 6,
+  padding: 8,
+  borderRadius: 16,
+  background: dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)",
+  border: dark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.06)",
+  marginBottom: 16,
+  overflowX: "auto"
+};
 
   const tabBtn = {
-    flex: 1,
-    padding: "10px 12px",
-    borderRadius: 14,
-    border: "none",
-    cursor: "pointer",
-    fontWeight: 800,
-    fontSize: 13,
-    letterSpacing: 0.2,
-    background: "transparent",
-    color: dark ? "rgba(255,255,255,0.75)" : "rgba(0,0,0,0.7)"
-  };
+  flex: 1,
+  minWidth: 0,
+  padding: "10px 8px",
+  borderRadius: 14,
+  border: "none",
+  cursor: "pointer",
+  fontWeight: 800,
+  fontSize: 12,
+  letterSpacing: 0.1,
+  background: "transparent",
+  color: dark ? "rgba(255,255,255,0.75)" : "rgba(0,0,0,0.7)",
+  whiteSpace: "nowrap"
+};
 
   const tabBtnActive = {
     background: dark
@@ -651,7 +654,7 @@ const headerProgressFill = {
     onClick={() => setTab("add")}
     style={{ ...tabBtn, ...(tab === "add" ? tabBtnActive : {}) }}
   >
-    Adicionar
+    Carta
   </button>
 
   <button
