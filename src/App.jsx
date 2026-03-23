@@ -470,15 +470,19 @@ function getWeeklyData() {
   const flipSound = new Audio();
 flipSound.src = "/flip.mp3";
 
-  const inputStyle = {
-  width: 360,
+  const formWidth = 320;
+
+const inputStyle = {
+  width: 350,
+  maxWidth: "100%",
   padding: 12,
   marginBottom: 10,
   borderRadius: 10,
   border: "1px solid #ccc",
   fontSize: 14,
-  outline: "none"
-};; 
+  outline: "none",
+  boxSizing: "border-box"
+};
 
   const button = {
     padding: 14,
