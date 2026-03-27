@@ -107,9 +107,12 @@ export default function App() {
   const [userData, setUserData] = useState(null);
   const [toast, setToast] = useState(null);
   const [userDataLoading, setUserDataLoading] = useState(false);
+  const [showPremiumWelcome, setShowPremiumWelcome] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
-  const isPremium = userData?.plan === "premium";
-  const currentPlan = userData?.plan || "free";
+  const currentPlan = userData?.subscription?.plan || userData?.plan || "free";
+  const subscriptionStatus = userData?.subscription?.status || "inactive";
+  const isPremium = currentPlan === "premium" && subscriptionStatus === "active";
 
   const activeDeck = allDecks.find(d => String(d.id) === String(activeDeckId));
   const isPresetDeck = !!activeDeck?.isBuiltIn;
@@ -146,6 +149,17 @@ export default function App() {
   }
 `;
 
+  const drawerAnimation = `
+@keyframes slideInLeft {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+`;
+
   const toastAnimation = `
 @keyframes fadeInUp {
   from {
@@ -176,6 +190,22 @@ export default function App() {
         email: user.email || "",
         photoURL: user.photoURL || "",
         plan: "free",
+        subscription: {
+          plan: "free",
+          status: "inactive",
+          source: "manual",
+          startedAt: null,
+          expiresAt: null
+        },
+        premiumOnboarding: {
+          welcomeSeen: false,
+          completed: false,
+          completedAt: null
+        },
+        notifications: {
+          enabled: false,
+          time: "20:00"
+        },
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
@@ -200,6 +230,129 @@ export default function App() {
     };
   }
 
+  async function ensureUserSubscription(userDoc) {
+    if (!user || !userDoc) return;
+
+    if (userDoc.subscription?.plan) return;
+
+    try {
+      const userRef = doc(db, "users", user.uid);
+
+      await updateDoc(userRef, {
+        subscription: {
+          plan: userDoc.plan || "free",
+          status: userDoc.plan === "premium" ? "active" : "inactive",
+          source: "manual",
+          startedAt: userDoc.plan === "premium" ? new Date().toISOString() : null,
+          expiresAt: null
+        },
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      console.error("Erro ao garantir subscription do usuário:", error);
+    }
+  }
+
+  async function ensurePremiumOnboarding(userDoc) {
+    if (!user || !userDoc) return;
+
+    if (userDoc.premiumOnboarding) return;
+
+    try {
+      const userRef = doc(db, "users", user.uid);
+
+      await updateDoc(userRef, {
+        premiumOnboarding: {
+          welcomeSeen: false,
+          completed: false,
+          completedAt: null
+        },
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      console.error("Erro ao garantir premiumOnboarding:", error);
+    }
+  }
+
+  async function ensureUserNotifications(userDoc) {
+    if (!user || !userDoc) return;
+
+    if (userDoc.notifications) return;
+
+    try {
+      const userRef = doc(db, "users", user.uid);
+
+      await updateDoc(userRef, {
+        notifications: {
+          enabled: false,
+          time: "20:00"
+        },
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      console.error("Erro ao garantir notifications:", error);
+    }
+  }
+
+  async function requestNotificationPermission() {
+    if (!("Notification" in window)) {
+      showToast("Seu navegador não suporta notificações");
+      return false;
+    }
+
+    const permission = await Notification.requestPermission();
+
+    return permission === "granted";
+  }
+
+  function sendSimpleNotification() {
+    if (!("Notification" in window)) return;
+    if (Notification.permission !== "granted") return;
+
+    new Notification("Don't Forget It", {
+      body: "Hora de estudar. Sua memória precisa de consistência 🧠",
+      icon: "/pwa-192x192.png"
+    });
+  }
+
+  async function updateNotificationSettings(patch) {
+    if (!user) return;
+
+    try {
+      const userRef = doc(db, "users", user.uid);
+
+      const next = {
+        enabled: userData?.notifications?.enabled || false,
+        time: userData?.notifications?.time || "20:00",
+        ...patch
+      };
+
+      await updateDoc(userRef, {
+        notifications: next,
+        updatedAt: serverTimestamp()
+      });
+
+      setUserData(prev => ({
+        ...prev,
+        notifications: next
+      }));
+    } catch (error) {
+      console.error("Erro notificações:", error);
+    }
+  }
+
+  async function enableReminder() {
+    const ok = await requestNotificationPermission();
+
+    if (!ok) return;
+
+    await updateNotificationSettings({
+      enabled: true
+    });
+
+    showToast("Lembrete ativado 🔔", "success");
+  }
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async currentUser => {
       setUser(currentUser);
@@ -212,11 +365,18 @@ export default function App() {
       setUserDataLoading(true);
 
       try {
-        // garante que o usuário existe
         await ensureUserDocument(currentUser);
 
-        // carrega dados do Firestore
-        const loadedUserData = await loadUserData(currentUser.uid);
+        let loadedUserData = await loadUserData(currentUser.uid);
+
+        await ensureUserSubscription(loadedUserData);
+        loadedUserData = await loadUserData(currentUser.uid);
+
+        await ensurePremiumOnboarding(loadedUserData);
+        loadedUserData = await loadUserData(currentUser.uid);
+
+        await ensureUserNotifications(loadedUserData);
+        loadedUserData = await loadUserData(currentUser.uid);
 
         setUserData(loadedUserData);
       } catch (error) {
@@ -255,6 +415,37 @@ export default function App() {
     loadUserDecks();
   }, [user]);
 
+  useEffect(() => {
+    if (!userData?.notifications?.enabled) return;
+
+    const interval = setInterval(() => {
+      const time = userData.notifications.time || "20:00";
+      const [h, m] = time.split(":").map(Number);
+
+      const now = new Date();
+
+      if (now.getHours() === h && now.getMinutes() === m) {
+        sendSimpleNotification();
+      }
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, [userData]);
+
+  useEffect(() => {
+    if (!userData) return;
+
+    const isPremiumActive =
+      userData?.subscription?.plan === "premium" &&
+      userData?.subscription?.status === "active";
+
+    const welcomeSeen = userData?.premiumOnboarding?.welcomeSeen;
+
+    if (isPremiumActive && !welcomeSeen) {
+      setShowPremiumWelcome(true);
+    }
+  }, [userData]);
+
   // 📥 Recupera sessão parcial (se for do mesmo dia)
   useEffect(() => {
     const saved = localStorage.getItem("partialSession");
@@ -290,20 +481,141 @@ export default function App() {
     try {
       const userRef = doc(db, "users", user.uid);
 
+      const nextSubscription = {
+        plan: newPlan,
+        status: newPlan === "premium" ? "active" : "inactive",
+        source: "manual",
+        startedAt: newPlan === "premium" ? new Date().toISOString() : null,
+        expiresAt: null
+      };
+      const nextPremiumOnboarding =
+        newPlan === "premium"
+          ? {
+            welcomeSeen: false,
+            completed: false,
+            completedAt: null
+          }
+          : (userData?.premiumOnboarding || {
+            welcomeSeen: false,
+            completed: false,
+            completedAt: null
+          });
+
       await updateDoc(userRef, {
         plan: newPlan,
+        subscription: nextSubscription,
+        premiumOnboarding: nextPremiumOnboarding,
         updatedAt: serverTimestamp()
       });
 
       setUserData(prev => ({
         ...prev,
-        plan: newPlan
+        plan: newPlan,
+        subscription: nextSubscription,
+        premiumOnboarding: nextPremiumOnboarding
       }));
 
       showToast(`Plano alterado para ${newPlan}`, "success");
     } catch (error) {
       console.error("Erro ao atualizar plano:", error);
       showToast("Erro ao atualizar plano");
+    }
+  }
+
+  async function cancelPremium() {
+    if (!user) {
+      showToast("Você precisa estar logado");
+      return;
+    }
+
+    try {
+      const userRef = doc(db, "users", user.uid);
+
+      const nextSubscription = {
+        plan: "premium",
+        status: "cancelled",
+        source: "manual",
+        startedAt: userData?.subscription?.startedAt || null,
+        expiresAt: null
+      };
+
+      await updateDoc(userRef, {
+        subscription: nextSubscription,
+        updatedAt: serverTimestamp()
+      });
+
+      setUserData(prev => ({
+        ...prev,
+        subscription: nextSubscription
+      }));
+
+      showToast("Assinatura cancelada");
+    } catch (error) {
+      console.error("Erro ao cancelar premium:", error);
+      showToast("Erro ao cancelar");
+    }
+  }
+
+  async function completePremiumOnboarding() {
+    if (!user) return;
+
+    try {
+      const userRef = doc(db, "users", user.uid);
+
+      await updateDoc(userRef, {
+        premiumOnboarding: {
+          welcomeSeen: true,
+          completed: true,
+          completedAt: new Date().toISOString()
+        },
+        updatedAt: serverTimestamp()
+      });
+
+      setUserData(prev => ({
+        ...prev,
+        premiumOnboarding: {
+          welcomeSeen: true,
+          completed: true,
+          completedAt: new Date().toISOString()
+        }
+      }));
+
+      setShowPremiumWelcome(false);
+      showToast("Bem-vindo ao Premium ✨", "success");
+    } catch (error) {
+      console.error("Erro ao finalizar onboarding premium:", error);
+      showToast("Erro ao finalizar onboarding");
+    }
+  }
+
+  async function dismissPremiumWelcome() {
+    if (!user) return;
+
+    try {
+      const userRef = doc(db, "users", user.uid);
+
+      await updateDoc(userRef, {
+        premiumOnboarding: {
+          welcomeSeen: true,
+          completed: false,
+          completedAt: null
+        },
+        updatedAt: serverTimestamp()
+      });
+
+      setUserData(prev => ({
+        ...prev,
+        premiumOnboarding: {
+          welcomeSeen: true,
+          completed: false,
+          completedAt: null
+        }
+      }));
+
+      setShowPremiumWelcome(false);
+    } catch (error) {
+      console.error("Erro ao fechar boas-vindas premium:", error);
+      showToast("Erro ao fechar boas-vindas");
     }
   }
 
@@ -963,6 +1275,21 @@ export default function App() {
 
   const formWidth = 320;
 
+  const input = {
+    width: "100%",
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: dark
+      ? "1px solid rgba(255,255,255,0.10)"
+      : "1px solid rgba(0,0,0,0.08)",
+    background: dark
+      ? "rgba(255,255,255,0.06)"
+      : "#fff",
+    color: dark ? "#fff" : "#111",
+    fontSize: 14,
+    outline: "none"
+  };
+
   const inputStyle = {
     width: 350,
     maxWidth: "100%",
@@ -1356,7 +1683,15 @@ export default function App() {
   }
   return (
     <div style={container}>
-      <style>{toastAnimation + hideScrollbar}</style>
+      <style>{toastAnimation + hideScrollbar + drawerAnimation}</style>
+      <style>
+        {`
+/* esconder scroll do modal premium */
+.premium-modal::-webkit-scrollbar {
+  display: none;
+}
+`}
+      </style>
       <div style={headerBox}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
           <div>
@@ -1383,6 +1718,18 @@ export default function App() {
               Treine sua mente. Evolua todos os dias.
             </p>
           </div>
+
+          <button
+            onClick={() => setShowSettings(true)}
+            style={{
+              border: "none",
+              background: "transparent",
+              fontSize: 20,
+              cursor: "pointer"
+            }}
+          >
+            ⚙️
+          </button>
 
 
           <button
@@ -1431,7 +1778,7 @@ export default function App() {
 
         {user && (
           <div style={{ marginTop: 20, fontSize: 14, opacity: 0.8 }}>
-            Plano atual: <strong>{currentPlan}</strong>
+            Plano atual: <strong>{currentPlan}</strong> | Status: <strong>{subscriptionStatus}</strong>
           </div>
         )}
 
@@ -1450,7 +1797,7 @@ export default function App() {
             </p>
 
             <p style={{ marginTop: 0, marginBottom: 12, fontSize: 14, opacity: 0.8 }}>
-              Plano atual: <strong>{currentPlan}</strong>
+              Plano: <strong>{currentPlan}</strong> | Status: <strong>{subscriptionStatus}</strong>
             </p>
 
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -1765,6 +2112,68 @@ export default function App() {
                 ? "🔒 Disponível no Premium"
                 : "Adicionar à minha conta"}
           </button>
+        </div>
+      )}
+
+      {tab === "settings" && (
+        <div style={box}>
+          <h3>⚙️ Configurações</h3>
+
+          <div
+            style={{
+              marginTop: 16,
+              padding: 14,
+              borderRadius: 16,
+              background: dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
+              border: dark ? "1px solid rgba(255,255,255,0.10)" : "1px solid rgba(0,0,0,0.08)"
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 800, opacity: 0.75 }}>
+              🔔 Lembrete diário
+            </div>
+
+            <div style={{ marginTop: 8, fontSize: 14, opacity: 0.8 }}>
+              Receba um lembrete para entrar no app e estudar.
+            </div>
+
+            <input
+              type="time"
+              value={userData?.notifications?.time || "20:00"}
+              onChange={(e) =>
+                updateNotificationSettings({ time: e.target.value })
+              }
+              style={{
+                ...input,
+                marginTop: 10
+              }}
+            />
+
+            {!userData?.notifications?.enabled ? (
+              <button
+                onClick={enableReminder}
+                style={{
+                  ...button,
+                  marginTop: 10,
+                  background: "linear-gradient(135deg, #7C5CFF, #5A8BFF)",
+                  color: "#fff"
+                }}
+              >
+                Ativar lembrete
+              </button>
+            ) : (
+              <button
+                onClick={() =>
+                  updateNotificationSettings({ enabled: false })
+                }
+                style={{
+                  ...button,
+                  marginTop: 10
+                }}
+              >
+                Desativar
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -2260,12 +2669,19 @@ export default function App() {
               </div>
             </div>
 
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
-              {currentPlan !== "premium" ? (
+            <div
+              style={{
+                display: "grid",
+                gap: 10,
+                marginTop: 18
+              }}
+            >
+              {!isPremium ? (
                 <button
                   onClick={() => updateMyPlan("premium")}
                   style={{
                     ...button,
+                    width: "100%",
                     background: "linear-gradient(135deg, #7C5CFF, #5A8BFF)",
                     color: "#fff",
                     boxShadow: "0 8px 30px rgba(124,92,255,0.25)"
@@ -2274,22 +2690,38 @@ export default function App() {
                   ✨ Desbloquear Premium
                 </button>
               ) : (
-                <button
-                  onClick={() => showToast("Você já está no Premium ✨", "success")}
-                  style={{
-                    ...button,
-                    background: "linear-gradient(135deg, #4CAF50, #43A047)",
-                    color: "#fff"
-                  }}
-                >
-                  ✅ Premium ativo
-                </button>
+                <>
+                  <button
+                    onClick={() => showToast("Você já está no Premium ✨", "success")}
+                    style={{
+                      ...button,
+                      width: "100%",
+                      background: "linear-gradient(135deg, #4CAF50, #43A047)",
+                      color: "#fff"
+                    }}
+                  >
+                    ✅ Premium ativo
+                  </button>
+
+                  <button
+                    onClick={cancelPremium}
+                    style={{
+                      ...button,
+                      width: "100%",
+                      background: dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)",
+                      color: dark ? "#fff" : "#111"
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                </>
               )}
 
               <button
                 onClick={() => setTab("decks")}
                 style={{
                   ...button,
+                  width: "100%",
                   background: dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)",
                   color: dark ? "#fff" : "#111"
                 }}
@@ -2450,6 +2882,280 @@ export default function App() {
           <p style={{ margin: "4px 0", fontSize: 14 }}>
             IA: <strong>{canUseAiTools ? "Sim" : "Não"}</strong>
           </p>
+        </div>
+      )}
+
+      {showSettings && (
+        <div
+          onClick={() => setShowSettings(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            zIndex: 9998
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              height: "100%",
+              width: "85%",
+              maxWidth: 360,
+              background: dark ? "#17172A" : "#fff",
+              padding: 20,
+              borderRight: dark
+                ? "1px solid rgba(255,255,255,0.08)"
+                : "1px solid rgba(0,0,0,0.06)",
+              boxShadow: "0 10px 40px rgba(0,0,0,0.2)",
+              animation: "slideInLeft 0.25s ease"
+            }}
+          >
+            <h3 style={{ marginTop: 0 }}>⚙️ Configurações</h3>
+
+            {/* NOTIFICAÇÕES */}
+            <div
+              style={{
+                marginTop: 16,
+                padding: 14,
+                borderRadius: 16,
+                background: dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
+                border: dark ? "1px solid rgba(255,255,255,0.10)" : "1px solid rgba(0,0,0,0.08)"
+              }}
+            >
+              <div style={{ fontSize: 12, fontWeight: 800, opacity: 0.75 }}>
+                🔔 Lembrete diário
+              </div>
+
+              <div style={{ marginTop: 8, fontSize: 14, opacity: 0.8 }}>
+                Receba um lembrete para entrar no app e estudar.
+              </div>
+
+              <input
+                type="time"
+                value={userData?.notifications?.time || "20:00"}
+                onChange={(e) =>
+                  updateNotificationSettings({ time: e.target.value })
+                }
+                style={{
+                  ...input,
+                  marginTop: 10
+                }}
+              />
+
+              {!userData?.notifications?.enabled ? (
+                <button
+                  onClick={enableReminder}
+                  style={{
+                    ...button,
+                    marginTop: 10,
+                    background: "linear-gradient(135deg, #7C5CFF, #5A8BFF)",
+                    color: "#fff"
+                  }}
+                >
+                  Ativar lembrete
+                </button>
+              ) : (
+                <button
+                  onClick={() =>
+                    updateNotificationSettings({ enabled: false })
+                  }
+                  style={{
+                    ...button,
+                    marginTop: 10
+                  }}
+                >
+                  Desativar
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPremiumWelcome && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+            overflowY: "auto",
+            zIndex: 9999
+          }}
+        >
+          <div
+            className="premium-modal"
+            style={{
+              width: "100%",
+              maxWidth: 560,
+              maxHeight: "calc(100vh - 40px)",
+              overflowY: "auto",
+              scrollbarWidth: "none",
+              msOverflowStyle: "none",
+              borderRadius: 24,
+              padding: 22,
+              background: dark ? "#17172A" : "#ffffff",
+              border: dark
+                ? "1px solid rgba(255,255,255,0.08)"
+                : "1px solid rgba(0,0,0,0.06)",
+              boxShadow: dark
+                ? "0 18px 50px rgba(0,0,0,0.45)"
+                : "0 18px 50px rgba(0,0,0,0.14)"
+            }}
+          >
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "6px 12px",
+                borderRadius: 999,
+                fontSize: 12,
+                fontWeight: 800,
+                background: dark ? "rgba(255,215,0,0.12)" : "rgba(255,215,0,0.18)",
+                border: "1px solid rgba(255,215,0,0.32)",
+                color: dark ? "#FFD76A" : "#8A6300"
+              }}
+            >
+              ✨ Bem-vindo ao Premium
+            </div>
+
+            <h2 style={{ marginTop: 16, marginBottom: 10, fontSize: 28, lineHeight: 1.1 }}>
+              Agora o Don&apos;t Forget It ficou ainda mais inteligente
+            </h2>
+
+            <p style={{ marginTop: 0, marginBottom: 18, fontSize: 15, lineHeight: 1.65, opacity: 0.82 }}>
+              Você desbloqueou a camada mais poderosa do app: análise avançada,
+              sequência de estudos, medalhas, decks mais completos e a base para
+              ferramentas inteligentes que vão evoluir com o tempo.
+            </p>
+
+            <div
+              style={{
+                display: "grid",
+                gap: 12,
+                marginBottom: 18
+              }}
+            >
+              <div
+                style={{
+                  padding: 14,
+                  borderRadius: 16,
+                  background: dark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
+                  border: dark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.06)"
+                }}
+              >
+                <strong>📊 Stats avançadas</strong>
+                <div style={{ marginTop: 6, fontSize: 14, opacity: 0.8, lineHeight: 1.5 }}>
+                  Entenda sua retenção, estabilidade, tempo de resposta e evolução cognitiva.
+                </div>
+              </div>
+
+              <div
+                style={{
+                  padding: 14,
+                  borderRadius: 16,
+                  background: dark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
+                  border: dark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.06)"
+                }}
+              >
+                <strong>🔥 Sequência e medalhas</strong>
+                <div style={{ marginTop: 6, fontSize: 14, opacity: 0.8, lineHeight: 1.5 }}>
+                  Transforme consistência em progresso real com marcos e recompensas visuais.
+                </div>
+              </div>
+
+              <div
+                style={{
+                  padding: 14,
+                  borderRadius: 16,
+                  background: dark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
+                  border: dark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.06)"
+                }}
+              >
+                <strong>📚 Conteúdo premium</strong>
+                <div style={{ marginTop: 6, fontSize: 14, opacity: 0.8, lineHeight: 1.5 }}>
+                  Estude com decks mais completos e, no futuro, com recursos inteligentes integrados.
+                </div>
+              </div>
+
+              <div
+                style={{
+                  padding: 14,
+                  borderRadius: 16,
+                  background: dark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
+                  border: dark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.06)"
+                }}
+              >
+                <strong>🧠 Por que isso funciona?</strong>
+
+                <div style={{ marginTop: 8, fontSize: 14, opacity: 0.85, lineHeight: 1.6 }}>
+                  Nosso sistema é baseado em pesquisas clássicas sobre memória, iniciadas por
+                  <strong> Hermann Ebbinghaus</strong>, que demonstraram que esquecemos grande parte do que aprendemos em poucas horas ou dias — um fenômeno conhecido como <strong>curva do esquecimento</strong>.
+                  <br /><br />
+                  Para combater isso, o Don’t Forget It utiliza <strong>repetição espaçada</strong>, uma técnica comprovada que agenda revisões exatamente no momento em que você está prestes a esquecer. Isso reduz drasticamente a perda de informação ao longo do tempo.
+                  <br /><br />
+                  Além disso, o sistema utiliza <strong>recuperação ativa</strong> — ou seja, você não apenas relê, mas precisa lembrar ativamente da resposta. Esse processo fortalece as conexões neurais de forma muito mais eficiente do que leitura passiva.
+                  <br /><br />
+                  Combinando esses princípios com análise do seu desempenho (tempo de resposta, acertos e dificuldade), o app adapta o estudo ao seu cérebro — criando um processo mais eficiente, consistente e de longo prazo.
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gap: 10 }}>
+              <button
+                onClick={() => {
+                  completePremiumOnboarding();
+                  setTab("premium");
+                }}
+                style={{
+                  ...button,
+                  width: "100%",
+                  background: "linear-gradient(135deg, #7C5CFF, #5A8BFF)",
+                  color: "#fff",
+                  boxShadow: "0 8px 30px rgba(124,92,255,0.25)"
+                }}
+              >
+                ✨ Explorar meu Premium
+              </button>
+
+              <button
+                onClick={() => {
+                  completePremiumOnboarding();
+                  setTab("stats");
+                }}
+                style={{
+                  ...button,
+                  width: "100%",
+                  background: dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)",
+                  color: dark ? "#fff" : "#111"
+                }}
+              >
+                📊 Ir para Stats avançadas
+              </button>
+
+              <button
+                onClick={dismissPremiumWelcome}
+                style={{
+                  ...button,
+                  width: "100%",
+                  background: "transparent",
+                  color: dark ? "rgba(255,255,255,0.72)" : "rgba(0,0,0,0.65)",
+                  border: dark
+                    ? "1px solid rgba(255,255,255,0.08)"
+                    : "1px solid rgba(0,0,0,0.06)"
+                }}
+              >
+                Ver isso depois
+              </button>
+            </div>
+          </div>
         </div>
       )}
       {toast && (
