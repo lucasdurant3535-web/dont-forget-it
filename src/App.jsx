@@ -10,6 +10,7 @@ import {
 } from "firebase/auth";
 import { deleteDoc } from "firebase/firestore";
 import { FEATURES, hasAccess } from "./features";
+import { generateCardsWithAI } from "./services/ai";
 
 console.log("Auth:", auth);
 console.log("Firestore:", db);
@@ -109,6 +110,13 @@ export default function App() {
   const [userDataLoading, setUserDataLoading] = useState(false);
   const [showPremiumWelcome, setShowPremiumWelcome] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [aiPreview, setAiPreview] = useState(null);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiTheme, setAiTheme] = useState("");
+  const [aiAmount, setAiAmount] = useState(10);
+  const [aiUsageInfo, setAiUsageInfo] = useState(null);
 
   const currentPlan = userData?.subscription?.plan || userData?.plan || "free";
   const subscriptionStatus = userData?.subscription?.status || "inactive";
@@ -163,6 +171,32 @@ export default function App() {
   const studyActiveDeck = studyDecks.find(
     deck => String(deck.id) === String(activeDeckId)
   ) || null;
+
+  const aiLimitReached = aiUsageInfo?.remaining === 0;
+
+  const aiFloatingButton = {
+    position: "fixed",
+    right: 20,
+    bottom: 90,
+    width: 58,
+    height: 58,
+    borderRadius: "50%",
+    border: "none",
+    background: dark ? "#7c5cff" : "#6d4aff",
+    color: "#fff",
+    fontWeight: 900,
+    fontSize: 18,
+    letterSpacing: 0.5,
+    cursor: "pointer",
+    boxShadow: dark
+      ? "0 10px 30px rgba(124,92,255,0.35)"
+      : "0 10px 30px rgba(109,74,255,0.28)",
+    zIndex: 9999,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    transition: "transform 0.2s ease, opacity 0.2s ease",
+  };
 
   const texts = {
     pt: {
@@ -500,6 +534,239 @@ export default function App() {
     });
 
     return text;
+  }
+
+  async function handleGenerateCardsAI() {
+    try {
+      setAiLoading(true);
+      setAiError("");
+      setAiPreview(null);
+
+      if (!user) {
+        setAiError("Você precisa estar logado.");
+        return;
+      }
+
+      const userRef = doc(db, "users", user.uid);
+      const snap = await getDoc(userRef);
+      const userData = snap.data();
+
+      const check = canUseAI(userData);
+
+      if (!check.allowed) {
+        await loadAIUsage();
+        setAiError(`Você atingiu o limite mensal de gerações (${check.limit}).`);
+        return;
+      }
+
+      const requestedAmount = Number(aiAmount) || 10;
+      const safeAmount = Math.min(requestedAmount, check.maxCards);
+
+      const res = await generateCardsWithAI({
+        theme: aiTheme,
+        amount: safeAmount,
+        language: "pt-BR",
+        level: "iniciante",
+      });
+
+      if (res?.ok) {
+        setAiPreview(res.content);
+        await incrementAIUsage(user);
+        await loadAIUsage();
+      } else {
+        setAiError("A IA não retornou conteúdo.");
+      }
+    } catch (err) {
+      console.error(err);
+      setAiError(err?.message || "Erro ao gerar cartas com IA.");
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  async function handleSaveAIDeck() {
+    try {
+      console.log("aiPreview:", aiPreview);
+      console.log("user:", user);
+
+      if (!aiPreview) {
+        alert("Nenhum conteúdo gerado pela IA para salvar.");
+        return;
+      }
+
+      if (!user) {
+        alert("Você precisa estar logado para salvar um deck.");
+        return;
+      }
+
+      const deckCollectionRef = collection(db, "users", user.uid, "decks");
+      const newDeckRef = doc(deckCollectionRef);
+
+      const nowIso = new Date().toISOString();
+
+      const localDeck = {
+        id: newDeckRef.id,
+        name: aiPreview.title || "Novo deck com IA",
+        description:
+          aiPreview.description || "Deck gerado por inteligência artificial.",
+        level: "iniciante",
+        isBuiltIn: false,
+        sourcePresetId: null,
+        userId: user.uid,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        cards: (aiPreview.cards || []).map((card, index) => ({
+          id: `${newDeckRef.id}-card-${index + 1}`,
+          question: card.front,
+          answer: card.back,
+          repetition: 0,
+          interval: 0,
+          ease: 2.5,
+          stability: 1,
+          nextReview: nowIso,
+          lastReview: nowIso,
+          reviewHistory: [],
+        })),
+      };
+
+      const firestoreDeck = {
+        ...localDeck,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+
+      await setDoc(newDeckRef, firestoreDeck);
+
+      setDecks((prev) => [localDeck, ...prev]);
+      setActiveDeckId(localDeck.id);
+      setTab("decks");
+
+      alert("Novo deck criado com sucesso 🚀");
+
+      setAiPreview(null);
+      setAiOpen(false);
+      setAiTheme("");
+      setAiAmount(10);
+      setAiError("");
+    } catch (err) {
+      console.error("Erro ao salvar deck gerado por IA:", err);
+      alert(`Erro ao salvar deck: ${err.message}`);
+    }
+  }
+
+  function canUseAI(userData) {
+    if (!userData) return { allowed: false, limit: 0, maxCards: 0 };
+
+    const currentMonth = new Date().toISOString().slice(0, 7); // ex: 2026-03
+
+    const usage = userData.aiUsage || {
+      month: currentMonth,
+      count: 0,
+    };
+
+    const isPremium =
+      userData?.plan === "premium" ||
+      userData?.subscription?.plan === "premium" ||
+      userData?.subscription?.status === "active";
+
+    const FREE_LIMIT = 1;
+    const PREMIUM_LIMIT = 30;
+
+    const FREE_MAX_CARDS = 15;
+    const PREMIUM_MAX_CARDS = 30;
+
+    const limit = isPremium ? PREMIUM_LIMIT : FREE_LIMIT;
+    const maxCards = isPremium ? PREMIUM_MAX_CARDS : FREE_MAX_CARDS;
+
+    if (usage.month !== currentMonth) {
+      return {
+        allowed: true,
+        usage: { month: currentMonth, count: 0 },
+        limit,
+        maxCards,
+        isPremium,
+      };
+    }
+
+    if (usage.count >= limit) {
+      return {
+        allowed: false,
+        usage,
+        limit,
+        maxCards,
+        isPremium,
+      };
+    }
+
+    return {
+      allowed: true,
+      usage,
+      limit,
+      maxCards,
+      isPremium,
+    };
+  }
+
+  async function incrementAIUsage(user) {
+    const userRef = doc(db, "users", user.uid);
+
+    const currentMonth = new Date().toISOString().slice(0, 7); // ex: 2026-03
+
+    const snap = await getDoc(userRef);
+    const data = snap.data();
+
+    let usage = data?.aiUsage || { month: currentMonth, count: 0 };
+
+    if (usage.month !== currentMonth) {
+      usage = { month: currentMonth, count: 0 };
+    }
+
+    usage.count += 1;
+
+    await updateDoc(userRef, {
+      aiUsage: usage,
+    });
+
+    return usage;
+  }
+
+  async function loadAIUsage() {
+    if (!user) return;
+
+    const userRef = doc(db, "users", user.uid);
+    const snap = await getDoc(userRef);
+    const userData = snap.data();
+
+    const currentMonth = new Date().toISOString().slice(0, 7);
+
+    const isPremium =
+      userData?.plan === "premium" ||
+      userData?.subscription?.plan === "premium" ||
+      userData?.subscription?.status === "active";
+
+    const limit = isPremium ? 30 : 1;
+
+    let usage = userData?.aiUsage || {
+      month: currentMonth,
+      count: 0,
+    };
+
+    if (usage.month !== currentMonth) {
+      usage = {
+        month: currentMonth,
+        count: 0,
+      };
+    }
+
+    const current = usage.count || 0;
+    const remaining = Math.max(limit - current, 0);
+
+    setAiUsageInfo({
+      current,
+      limit,
+      remaining,
+      isPremium,
+    });
   }
 
   useEffect(() => {
@@ -3286,7 +3553,11 @@ export default function App() {
                 }}
                 style={{
                   ...input,
-                  marginTop: 10
+                  marginTop: 10,
+                  backgroundColor: "#fff",
+                  color: "#111",
+                  border: "1px solid rgba(0,0,0,0.10)",
+                  colorScheme: "light"
                 }}
               >
                 <option value="pt">Português</option>
@@ -3505,6 +3776,294 @@ export default function App() {
           }}
         >
           {toast.message}
+        </div>
+      )}
+
+      <button
+        onClick={() => {
+          setAiError("");
+          setAiPreview(null);
+          setAiOpen(true);
+          loadAIUsage();
+        }}
+        title="Abrir IA"
+        style={{
+          position: "fixed",
+          right: 20,
+          bottom: 90,
+          width: 58,
+          height: 58,
+          borderRadius: "50%",
+          border: "none",
+          background: dark ? "#7c5cff" : "#6d4aff",
+          color: "#fff",
+          fontWeight: 900,
+          fontSize: 18,
+          letterSpacing: 0.5,
+          cursor: "pointer",
+          boxShadow: dark
+            ? "0 10px 30px rgba(124,92,255,0.35)"
+            : "0 10px 30px rgba(109,74,255,0.28)",
+          zIndex: 9999,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        AI
+      </button>
+      {aiOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.45)",
+            zIndex: 10000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+          onClick={() => setAiOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: 520,
+              maxHeight: "85vh",
+              overflowY: "auto",
+              borderRadius: 24,
+              padding: 20,
+              background: dark ? "#181818" : "#fff",
+              color: dark ? "#fff" : "#111",
+              boxShadow: dark
+                ? "0 20px 60px rgba(0,0,0,0.45)"
+                : "0 20px 60px rgba(0,0,0,0.15)",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h3 style={{ margin: 0 }}>✨ Gerar cartas com IA</h3>
+              <button
+                onClick={() => setAiOpen(false)}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  color: dark ? "#fff" : "#111",
+                  fontSize: 22,
+                  cursor: "pointer",
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ display: "grid", gap: 12 }}>
+              <input
+                value={aiTheme}
+                onChange={(e) => setAiTheme(e.target.value)}
+                placeholder="Ex: Espanhol para iniciantes"
+                style={{
+                  width: "100%",
+                  padding: 14,
+                  borderRadius: 14,
+                  border: dark
+                    ? "1px solid rgba(255,255,255,0.10)"
+                    : "1px solid rgba(0,0,0,0.10)",
+                  background: dark ? "#232323" : "#fff",
+                  color: dark ? "#fff" : "#111",
+                  outline: "none",
+                  fontSize: 15,
+                }}
+              />
+
+              <input
+                type="number"
+                min="1"
+                max="30"
+                value={aiAmount}
+                onChange={(e) => setAiAmount(Number(e.target.value))}
+                style={{
+                  width: "100%",
+                  padding: 14,
+                  borderRadius: 14,
+                  border: dark
+                    ? "1px solid rgba(255,255,255,0.10)"
+                    : "1px solid rgba(0,0,0,0.10)",
+                  background: dark ? "#232323" : "#fff",
+                  color: dark ? "#fff" : "#111",
+                  outline: "none",
+                  fontSize: 15,
+                }}
+              />
+
+              <button
+                onClick={handleGenerateCardsAI}
+                disabled={aiLoading || aiLimitReached}
+                style={{
+                  border: "none",
+                  borderRadius: 14,
+                  padding: "14px 16px",
+                  fontWeight: 800,
+                  cursor: aiLoading || aiLimitReached ? "not-allowed" : "pointer",
+                  background: aiLimitReached ? "#777" : "#7c5cff",
+                  color: "#fff",
+                  opacity: aiLoading || aiLimitReached ? 0.7 : 1,
+                }}
+              >
+                {aiLoading
+                  ? "Gerando..."
+                  : aiLimitReached
+                    ? "Limite atingido"
+                    : "Gerar cartas"}
+              </button>
+              {aiUsageInfo && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: "12px 14px",
+                    borderRadius: 14,
+                    background: aiLimitReached
+                      ? dark
+                        ? "rgba(255, 193, 7, 0.10)"
+                        : "rgba(255, 193, 7, 0.12)"
+                      : dark
+                        ? "rgba(124,92,255,0.12)"
+                        : "rgba(124,92,255,0.08)",
+                    border: aiLimitReached
+                      ? "1px solid rgba(255, 193, 7, 0.25)"
+                      : "1px solid rgba(124,92,255,0.16)",
+                  }}
+                >
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: 13,
+                      lineHeight: 1.5,
+                      fontWeight: 700,
+                      color: dark ? "#fff" : "#111",
+                    }}
+                  >
+                    {aiLimitReached
+                      ? "⚠️ Você já usou todas as gerações disponíveis deste mês."
+                      : aiUsageInfo.remaining === 1
+                        ? "Você ainda tem 1 geração disponível neste mês."
+                        : `Você ainda tem ${aiUsageInfo.remaining} gerações disponíveis neste mês.`}
+                  </p>
+
+                  {aiLimitReached && (
+                    <p
+                      style={{
+                        margin: "6px 0 0 0",
+                        fontSize: 12,
+                        lineHeight: 1.5,
+                        opacity: 0.85,
+                      }}
+                    >
+                      Faça upgrade para continuar criando decks com IA e estudar sem travar seu ritmo.
+                    </p>
+                  )}
+                </div>
+              )}
+              <p
+                style={{
+                  marginTop: 10,
+                  marginBottom: 0,
+                  fontSize: 13,
+                  opacity: 0.8,
+                  lineHeight: 1.6,
+                }}
+              >
+                Free: 1 geração por mês com até 15 cartas por deck.
+                <br />
+                ✨ Premium: até 30 gerações por mês com até 30 cartas por deck.
+              </p>
+              <button
+                onClick={() => {
+                  setAiOpen(false);
+                  setTab("premium");
+                }}
+                style={{
+                  marginTop: 12,
+                  width: "100%",
+                  padding: "12px",
+                  borderRadius: 12,
+                  border: "none",
+                  fontWeight: 800,
+                  cursor: "pointer",
+                  background: "linear-gradient(90deg,#7c5cff,#9c27b0)",
+                  color: "#fff",
+                  fontSize: 14,
+                }}
+              >
+                {aiLimitReached
+                  ? "✨ Desbloquear mais gerações com IA"
+                  : "✨ Quero mais gerações com IA"}
+              </button>
+            </div>
+
+            {aiError && (
+              <div
+                style={{
+                  marginTop: 16,
+                  padding: 12,
+                  borderRadius: 14,
+                  background: dark ? "#2a1616" : "#fff5f5",
+                  color: "#d92d20",
+                  border: "1px solid rgba(217,45,32,0.2)",
+                  fontWeight: 600,
+                }}
+              >
+                {aiError}
+              </div>
+            )}
+
+            {aiPreview && (
+              <div style={{ marginTop: 20 }}>
+                <h4 style={{ marginBottom: 6 }}>{aiPreview.title}</h4>
+                <p style={{ opacity: 0.75, marginTop: 0 }}>
+                  {aiPreview.description}
+                </p>
+
+                <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
+                  {aiPreview.cards.map((card, index) => (
+                    <div
+                      key={index}
+                      style={{
+                        padding: 14,
+                        borderRadius: 16,
+                        border: dark
+                          ? "1px solid rgba(255,255,255,0.08)"
+                          : "1px solid rgba(0,0,0,0.08)",
+                        background: dark ? "#202020" : "#fafafa",
+                      }}
+                    >
+                      <div style={{ fontWeight: 700, marginBottom: 8 }}>
+                        {index + 1}. {card.front}
+                      </div>
+                      <div style={{ opacity: 0.85 }}>{card.back}</div>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={handleSaveAIDeck}
+                  style={{
+                    marginTop: 20,
+                    width: "100%",
+                    padding: "14px",
+                    borderRadius: 14,
+                    border: "none",
+                    fontWeight: 800,
+                    cursor: "pointer",
+                    background: "#00c853",
+                    color: "#fff",
+                  }}
+                >
+                  💾 Salvar novo deck
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
