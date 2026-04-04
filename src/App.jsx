@@ -12,6 +12,9 @@ import { deleteDoc } from "firebase/firestore";
 import { FEATURES, hasAccess } from "./features";
 import { generateCardsWithAI } from "./services/ai";
 
+import { httpsCallable } from "firebase/functions";
+import { functions } from "./firebase"; // ou onde você inicializa
+
 console.log("Auth:", auth);
 console.log("Firestore:", db);
 
@@ -118,9 +121,14 @@ export default function App() {
   const [aiAmount, setAiAmount] = useState(10);
   const [aiUsageInfo, setAiUsageInfo] = useState(null);
 
-  const currentPlan = userData?.subscription?.plan || userData?.plan || "free";
-  const subscriptionStatus = userData?.subscription?.status || "inactive";
-  const isPremium = currentPlan === "premium" && subscriptionStatus === "active";
+  const subscription = userData?.subscription || {};
+
+  const currentPlan = subscription.plan || "free";
+  const subscriptionStatus = subscription.status || "inactive";
+
+  const isPremium =
+    subscription.plan === "premium" &&
+    subscription.status === "active";
 
   const activeDeck = allDecks.find(d => String(d.id) === String(activeDeckId));
   const isPresetDeck = !!activeDeck?.isBuiltIn;
@@ -173,6 +181,9 @@ export default function App() {
   ) || null;
 
   const aiLimitReached = aiUsageInfo?.remaining === 0;
+
+  const audioCacheRef = useRef({});
+  const currentAudioRef = useRef(null);
 
   const aiFloatingButton = {
     position: "fixed",
@@ -619,6 +630,8 @@ export default function App() {
           id: `${newDeckRef.id}-card-${index + 1}`,
           question: card.front,
           answer: card.back,
+          questionLang: card.frontLang || "unknown",
+          answerLang: card.backLang || "unknown",
           repetition: 0,
           interval: 0,
           ease: 2.5,
@@ -769,6 +782,48 @@ export default function App() {
     });
   }
 
+  async function speakWithAI(text, lang) {
+    try {
+      if (!text || !lang) return;
+      if (lang === "pt-BR") return;
+
+      const cacheKey = `${lang}::${text}`;
+
+      // para áudio anterior
+      if (currentAudioRef.current) {
+        currentAudioRef.current.pause();
+        currentAudioRef.current.currentTime = 0;
+      }
+
+      // ✅ usa cache se já existir
+      if (audioCacheRef.current[cacheKey]) {
+        const cachedAudio = new Audio(audioCacheRef.current[cacheKey]);
+        currentAudioRef.current = cachedAudio;
+        await cachedAudio.play();
+        return;
+      }
+
+      const generateSpeech = httpsCallable(functions, "generateSpeech");
+      const res = await generateSpeech({ text, lang });
+
+      const base64 = res.data.audioBase64;
+      const audioSrc = `data:audio/mp3;base64,${base64}`;
+
+      // salva no cache
+      audioCacheRef.current[cacheKey] = audioSrc;
+
+      const audio = new Audio(audioSrc);
+      currentAudioRef.current = audio;
+      await audio.play();
+    } catch (err) {
+      console.error("Erro ao tocar áudio com IA:", err);
+    }
+  }
+
+  function shouldSpeak(lang) {
+    return lang && lang !== "pt-BR";
+  }
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async currentUser => {
       setUser(currentUser);
@@ -865,6 +920,18 @@ export default function App() {
     }
   }, [userData]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const checkout = params.get("checkout");
+
+    if (checkout === "success") {
+      showToast("Pagamento realizado com sucesso! Agora é só aguardar a ativação do Premium.", "success");
+
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, document.title, newUrl);
+    }
+  }, []);
+
   // 📥 Recupera sessão parcial (se for do mesmo dia)
   useEffect(() => {
     const saved = localStorage.getItem("partialSession");
@@ -890,56 +957,6 @@ export default function App() {
   }, [activeDeckId]);
 
   const [newDeck, setNewDeck] = useState("");
-
-  async function updateMyPlan(newPlan) {
-    if (!user) {
-      showToast("Você precisa estar logado");
-      return;
-    }
-
-    try {
-      const userRef = doc(db, "users", user.uid);
-
-      const nextSubscription = {
-        plan: newPlan,
-        status: newPlan === "premium" ? "active" : "inactive",
-        source: "manual",
-        startedAt: newPlan === "premium" ? new Date().toISOString() : null,
-        expiresAt: null
-      };
-      const nextPremiumOnboarding =
-        newPlan === "premium"
-          ? {
-            welcomeSeen: false,
-            completed: false,
-            completedAt: null
-          }
-          : (userData?.premiumOnboarding || {
-            welcomeSeen: false,
-            completed: false,
-            completedAt: null
-          });
-
-      await updateDoc(userRef, {
-        plan: newPlan,
-        subscription: nextSubscription,
-        premiumOnboarding: nextPremiumOnboarding,
-        updatedAt: serverTimestamp()
-      });
-
-      setUserData(prev => ({
-        ...prev,
-        plan: newPlan,
-        subscription: nextSubscription,
-        premiumOnboarding: nextPremiumOnboarding
-      }));
-
-      showToast(`Plano alterado para ${newPlan}`, "success");
-    } catch (error) {
-      console.error("Erro ao atualizar plano:", error);
-      showToast("Erro ao atualizar plano");
-    }
-  }
 
   async function cancelPremium() {
     if (!user) {
@@ -2039,6 +2056,37 @@ export default function App() {
             >
               Toque na carta para virar
             </p>
+            <button
+              onClick={() => {
+                const card = session[index];
+
+                const text = showBack
+                  ? card.answer
+                  : card.question;
+
+                const lang = showBack
+                  ? card.answerLang
+                  : card.questionLang;
+
+                if (lang && lang !== "pt-BR") {
+                  speakWithAI(text, lang);
+                }
+              }}
+              style={{
+                marginTop: 12,
+                border: "none",
+                background: "transparent",
+                color: dark ? "#fff" : "#111",
+                fontSize: 20,
+                cursor: "pointer",
+                opacity: 0.85,
+                display: "block",
+                marginLeft: "auto",
+                marginRight: "auto"
+              }}
+            >
+              🔊
+            </button>
           </div>
 
           {showBack && (
@@ -2199,12 +2247,6 @@ export default function App() {
         </div>
 
         {user && (
-          <div style={{ marginTop: 20, fontSize: 14, opacity: 0.8 }}>
-            Plano atual: <strong>{currentPlan}</strong> | Status: <strong>{subscriptionStatus}</strong>
-          </div>
-        )}
-
-        {user && (
           <div
             style={{
               marginTop: 16,
@@ -2215,44 +2257,12 @@ export default function App() {
             }}
           >
             <p style={{ marginTop: 0, marginBottom: 10, fontWeight: 800 }}>
-              Teste de Plano
+              Plano atual
             </p>
 
-            <p style={{ marginTop: 0, marginBottom: 12, fontSize: 14, opacity: 0.8 }}>
+            <p style={{ marginTop: 0, marginBottom: 0, fontSize: 14, opacity: 0.8 }}>
               Plano: <strong>{currentPlan}</strong> | Status: <strong>{subscriptionStatus}</strong>
             </p>
-
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button
-                onClick={() => updateMyPlan("free")}
-                style={{
-                  ...button,
-                  background: currentPlan === "free"
-                    ? "linear-gradient(135deg, #4CAF50, #43A047)"
-                    : dark
-                      ? "rgba(255,255,255,0.06)"
-                      : "rgba(0,0,0,0.06)",
-                  color: "#fff"
-                }}
-              >
-                Free
-              </button>
-
-              <button
-                onClick={() => updateMyPlan("premium")}
-                style={{
-                  ...button,
-                  background: currentPlan === "premium"
-                    ? "linear-gradient(135deg, #7C5CFF, #5A8BFF)"
-                    : dark
-                      ? "rgba(255,255,255,0.06)"
-                      : "rgba(0,0,0,0.06)",
-                  color: "#fff"
-                }}
-              >
-                Premium
-              </button>
-            </div>
           </div>
         )}
 
@@ -3247,7 +3257,9 @@ export default function App() {
             >
               {!isPremium ? (
                 <button
-                  onClick={() => updateMyPlan("premium")}
+                  onClick={() => {
+                    window.location.href = "https://buy.stripe.com/test_14A6oI3Iybq8d7x4hZdUY00";
+                  }}
                   style={{
                     ...button,
                     width: "100%",

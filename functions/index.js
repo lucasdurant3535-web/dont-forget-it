@@ -3,6 +3,7 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const logger = require("firebase-functions/logger");
 const OpenAI = require("openai");
 
+
 setGlobalOptions({ maxInstances: 10 });
 
 exports.generateCardsWithAI = onCall(
@@ -138,9 +139,30 @@ Formato obrigatório:
         level,
       });
 
+      function detectLangSimple(text) {
+        if (!text || typeof text !== "string") return "unknown";
+
+        const normalized = text.toLowerCase();
+
+        if (/[ãõçâêôáéíóúà]/i.test(normalized)) return "pt-BR";
+        if (/[ñ¿¡]/i.test(normalized)) return "es-ES";
+        if (/[äöüß]/i.test(normalized)) return "de-DE";
+
+        return "en-US";
+      }
+
+      const parsedWithLang = {
+        ...parsed,
+        cards: parsed.cards.map((card) => ({
+          ...card,
+          frontLang: detectLangSimple(card.front),
+          backLang: detectLangSimple(card.back),
+        })),
+      };
+
       return {
         ok: true,
-        content: parsed,
+        content: parsedWithLang,
       };
     } catch (error) {
       logger.error("Erro em generateCardsWithAI:", error);
@@ -152,6 +174,57 @@ Formato obrigatório:
       throw new HttpsError(
         "internal",
         error?.message || "Erro ao gerar cartas com IA."
+      );
+    }
+  }
+);
+exports.generateSpeech = onCall(
+  {
+    cors: true,
+    secrets: ["OPENAI_API_KEY"],
+  },
+  async (request) => {
+    try {
+      const text = request.data?.text;
+      const lang = request.data?.lang;
+
+      if (!text) {
+        throw new HttpsError("invalid-argument", "Texto não fornecido.");
+      }
+
+      const apiKey = process.env.OPENAI_API_KEY;
+
+      if (!apiKey) {
+        throw new HttpsError(
+          "failed-precondition",
+          "OPENAI_API_KEY não encontrada no ambiente."
+        );
+      }
+
+      const openai = new OpenAI({ apiKey });
+
+      const response = await openai.audio.speech.create({
+        model: "gpt-4o-mini-tts",
+        voice: "alloy",
+        input: text,
+      });
+
+      const audioBuffer = Buffer.from(await response.arrayBuffer());
+
+      return {
+        ok: true,
+        audioBase64: audioBuffer.toString("base64"),
+      };
+    } catch (error) {
+      console.error("Erro TTS:", error);
+
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+
+      throw new HttpsError(
+        "internal",
+        error?.message || "Erro ao gerar áudio"
       );
     }
   }
