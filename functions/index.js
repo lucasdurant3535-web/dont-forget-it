@@ -1,10 +1,13 @@
 const { setGlobalOptions } = require("firebase-functions/v2");
-const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
 const logger = require("firebase-functions/logger");
 const OpenAI = require("openai");
-
+const Stripe = require("stripe");
+const admin = require("firebase-admin");
 
 setGlobalOptions({ maxInstances: 10 });
+
+admin.initializeApp();
 
 exports.generateCardsWithAI = onCall(
   {
@@ -226,6 +229,157 @@ exports.generateSpeech = onCall(
         "internal",
         error?.message || "Erro ao gerar áudio"
       );
+    }
+  }
+);
+exports.createCheckoutSession = onCall(
+  {
+    cors: true,
+    secrets: ["STRIPE_SECRET_KEY"],
+  },
+  async (request) => {
+    try {
+      const uid = request.auth?.uid;
+      const email = request.auth?.token?.email;
+
+      if (!uid || !email) {
+        throw new HttpsError(
+          "unauthenticated",
+          "Usuário não autenticado."
+        );
+      }
+
+      const stripeKey = process.env.STRIPE_SECRET_KEY;
+
+      if (!stripeKey) {
+        throw new HttpsError(
+          "failed-precondition",
+          "STRIPE_SECRET_KEY não encontrada no ambiente."
+        );
+      }
+
+      const stripe = new Stripe(stripeKey);
+
+      const session = await stripe.checkout.sessions.create({
+        mode: "subscription",
+        customer_email: email,
+        line_items: [
+          {
+            price: "price_1TILadL4aYADZfLHsUyIzORS",
+            quantity: 1,
+          },
+        ],
+        success_url: "https://dont-forget-it-khaki.vercel.app/?checkout=success",
+        cancel_url: "https://dont-forget-it-khaki.vercel.app/?checkout=cancel",
+        metadata: {
+          uid,
+          email,
+        },
+      });
+
+      return {
+        ok: true,
+        url: session.url,
+      };
+    } catch (error) {
+      logger.error("Erro em createCheckoutSession:", error);
+
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+
+      throw new HttpsError(
+        "internal",
+        error?.message || "Erro ao criar sessão de checkout."
+      );
+    }
+  }
+);
+
+exports.stripeWebhook = onRequest(
+  {
+    cors: false,
+    secrets: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],
+  },
+  async (req, res) => {
+    const stripeKey = process.env.STRIPE_SECRET_KEY;
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+    if (!stripeKey) {
+      logger.error("STRIPE_SECRET_KEY não configurada.");
+      res.status(500).send("Webhook não configurado.");
+      return;
+    }
+
+    if (!webhookSecret) {
+      logger.error("STRIPE_WEBHOOK_SECRET ainda não configurada.");
+      res.status(500).send("Webhook secret ausente.");
+      return;
+    }
+
+    const stripe = new Stripe(stripeKey);
+
+    let event;
+
+    try {
+      const signature = req.headers["stripe-signature"];
+
+      event = stripe.webhooks.constructEvent(
+        req.rawBody,
+        signature,
+        webhookSecret
+      );
+    } catch (err) {
+      logger.error("Assinatura do webhook inválida:", err?.message || err);
+      res.status(400).send(`Webhook Error: ${err.message}`);
+      return;
+    }
+
+    try {
+      if (event.type === "checkout.session.completed") {
+        const session = event.data.object;
+
+        const uid = session.metadata?.uid;
+        const email = session.metadata?.email;
+
+        if (!uid) {
+          logger.error("UID ausente na metadata da Checkout Session.", {
+            sessionId: session.id,
+            email,
+          });
+          res.status(400).send("UID ausente.");
+          return;
+        }
+
+        const userRef = admin.firestore().collection("users").doc(uid);
+
+        await userRef.set(
+          {
+            plan: "premium",
+            subscription: {
+              plan: "premium",
+              status: "active",
+              source: "stripe",
+              customerEmail: email || null,
+              stripeCheckoutSessionId: session.id || null,
+              updatedAt: new Date().toISOString(),
+            },
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+
+        logger.info("Usuário ativado como premium com sucesso.", {
+          uid,
+          email,
+          sessionId: session.id,
+        });
+      }
+
+      res.status(200).send("Evento recebido com sucesso.");
+    } catch (err) {
+      logger.error("Erro ao processar webhook:", err);
+      res.status(500).send("Erro interno no webhook.");
     }
   }
 );

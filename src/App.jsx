@@ -3263,8 +3263,23 @@ export default function App() {
             >
               {!isPremium ? (
                 <button
-                  onClick={() => {
-                    window.location.href = "https://buy.stripe.com/test_14A6oI3Iybq8d7x4hZdUY00";
+                  onClick={async () => {
+                    try {
+                      const createCheckoutSession = httpsCallable(functions, "createCheckoutSession");
+                      const res = await createCheckoutSession();
+
+                      const url = res.data?.url;
+
+                      if (!url) {
+                        showToast("Não foi possível iniciar o pagamento.");
+                        return;
+                      }
+
+                      window.location.href = url;
+                    } catch (error) {
+                      console.error("Erro ao abrir checkout:", error);
+                      showToast("Erro ao iniciar pagamento.");
+                    }
                   }}
                   style={{
                     ...button,
@@ -3276,7 +3291,8 @@ export default function App() {
                 >
                   ✨ Desbloquear Premium
                 </button>
-              ) : (
+              ) : null}
+              {isPremium && (
                 <>
                   <button
                     onClick={() => showToast("Você já está no Premium ✨", "success")}
@@ -3303,7 +3319,6 @@ export default function App() {
                   </button>
                 </>
               )}
-
               <button
                 onClick={() => setTab("decks")}
                 style={{
