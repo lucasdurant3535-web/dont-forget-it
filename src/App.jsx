@@ -121,7 +121,7 @@ export default function App() {
   const [aiAmount, setAiAmount] = useState(10);
   const [aiUsageInfo, setAiUsageInfo] = useState(null);
   const [authMode, setAuthMode] = useState("login");
-
+  const [authLoading, setAuthLoading] = useState(true);
 
   const subscription = userData?.subscription || {};
 
@@ -867,10 +867,13 @@ export default function App() {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async currentUser => {
+      setAuthLoading(true);
       setUser(currentUser);
 
       if (!currentUser) {
         setUserData(null);
+        setUserDataLoading(false);
+        setAuthLoading(false);
         return;
       }
 
@@ -898,6 +901,7 @@ export default function App() {
         console.error("Erro ao carregar dados do usuário:", error);
       } finally {
         setUserDataLoading(false);
+        setAuthLoading(false);
       }
     });
 
@@ -1879,6 +1883,27 @@ export default function App() {
     transition: "0.4s",
     borderRadius: 10
   };
+
+  if (authLoading || (user && userDataLoading)) {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: dark ? "#121212" : "#f5f7fb",
+          color: dark ? "#fff" : "#111",
+          padding: 24
+        }}
+      >
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 28, marginBottom: 10 }}>🧠</div>
+          <p style={{ margin: 0, opacity: 0.8 }}>Carregando sua conta...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!user) {
     return (
