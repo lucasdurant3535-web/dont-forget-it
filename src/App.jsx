@@ -3388,7 +3388,9 @@ export default function App() {
                   )}
 
                   <button
-                    onClick={cancelPremium}
+                    onClick={() =>
+                      showToast("O gerenciamento da assinatura será liberado em breve.")
+                    }
                     style={{
                       ...button,
                       width: "100%",
@@ -3396,7 +3398,7 @@ export default function App() {
                       color: dark ? "#fff" : "#111"
                     }}
                   >
-                    {isCancelScheduled ? "Cancelamento agendado" : "Cancelar assinatura"}
+                    {isCancelScheduled ? "Cancelamento agendado" : "Gerenciar assinatura"}
                   </button>
                 </>
               )}
