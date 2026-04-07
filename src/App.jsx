@@ -3,10 +3,12 @@ import { presetDecks } from "./data/presetDecks"
 import { auth, db } from "./firebase";
 import { collection, doc, setDoc, getDoc, getDocs, updateDoc, serverTimestamp } from "firebase/firestore";
 import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
   onAuthStateChanged,
-  signOut
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut,
+  GoogleAuthProvider,
+  signInWithPopup
 } from "firebase/auth";
 import { deleteDoc } from "firebase/firestore";
 import { FEATURES, hasAccess } from "./features";
@@ -1335,6 +1337,30 @@ export default function App() {
     }
   }
 
+  async function handleGoogleLogin() {
+    try {
+      const provider = new GoogleAuthProvider();
+
+      await signInWithPopup(auth, provider);
+
+      showToast("Login com Google realizado com sucesso!", "success");
+    } catch (error) {
+      console.error("Erro no login com Google:", error);
+
+      if (error.code === "auth/popup-closed-by-user") {
+        showToast("Login com Google cancelado.");
+        return;
+      }
+
+      if (error.code === "auth/account-exists-with-different-credential") {
+        showToast("Já existe uma conta com esse email usando outro método de login.");
+        return;
+      }
+
+      showToast("Erro ao entrar com Google.");
+    }
+  }
+
   async function updateCards(cards) {
     if (!activeDeckId) return;
 
@@ -1967,6 +1993,20 @@ export default function App() {
             }}
           >
             {authMode === "login" ? "Entrar" : "Criar conta"}
+          </button>
+
+          <button
+            onClick={handleGoogleLogin}
+            style={{
+              ...button,
+              background: dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)",
+              color: dark ? "#fff" : "#111",
+              border: dark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.08)",
+              width: "100%",
+              marginTop: 10
+            }}
+          >
+            Entrar com Google
           </button>
 
           <p
