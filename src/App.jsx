@@ -128,9 +128,17 @@ export default function App() {
   const currentPlan = subscription.plan || "free";
   const subscriptionStatus = subscription.status || "inactive";
 
+  const cancelAtPeriodEnd = subscription.cancelAtPeriodEnd || false;
+  const currentPeriodEnd = subscription.currentPeriodEnd || null;
+  const lastInvoiceStatus = subscription.lastInvoiceStatus || null;
+
   const isPremium =
-    subscription.plan === "premium" &&
-    subscription.status === "active";
+    currentPlan === "premium" &&
+    (subscriptionStatus === "active" || subscriptionStatus === "past_due");
+
+  const isCancelScheduled = cancelAtPeriodEnd === true;
+
+  const isPaymentIssue = lastInvoiceStatus === "payment_failed";
 
   const activeDeck = allDecks.find(d => String(d.id) === String(activeDeckId));
   const isPresetDeck = !!activeDeck?.isBuiltIn;
@@ -3260,9 +3268,8 @@ export default function App() {
                 </h2>
 
                 <p style={{ margin: 0, fontSize: 15, lineHeight: 1.6, opacity: 0.82, maxWidth: 700 }}>
-                  O Premium desbloqueia a camada mais poderosa do Don&apos;t Forget It:
-                  análise avançada, sequência de estudos, medalhas, decks mais completos,
-                  IA integrada e tudo o que vier nas próximas evoluções.
+                  Transforme seu estudo em um sistema inteligente.
+                  Gere decks com IA, acompanhe sua evolução cognitiva e estude com mais consistência — sem perder tempo criando tudo do zero.
                 </p>
               </div>
 
@@ -3281,6 +3288,17 @@ export default function App() {
                 <p style={{ margin: 0, fontSize: 22, fontWeight: 900 }}>
                   {currentPlan === "premium" ? "Premium" : "Free"}
                 </p>
+
+                {!isPremium && (
+                  <>
+                    <p style={{ marginTop: 10, marginBottom: 4, fontSize: 12, opacity: 0.6 }}>
+                      Assinatura
+                    </p>
+                    <p style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>
+                      R$ 19,90<span style={{ fontSize: 12, fontWeight: 400 }}>/mês</span>
+                    </p>
+                  </>
+                )}
               </div>
             </div>
 
@@ -3319,13 +3337,23 @@ export default function App() {
                     boxShadow: "0 8px 30px rgba(124,92,255,0.25)"
                   }}
                 >
-                  ✨ Desbloquear Premium
+                  ✨ Assinar Premium — R$ 19,90/mês
                 </button>
               ) : null}
+
+              {!isPremium && (
+                <p style={{
+                  textAlign: "center",
+                  fontSize: 12,
+                  opacity: 0.6,
+                  marginTop: 6
+                }}>
+                  Cancele a qualquer momento.
+                </p>
+              )}
               {isPremium && (
                 <>
                   <button
-                    onClick={() => showToast("Você já está no Premium ✨", "success")}
                     style={{
                       ...button,
                       width: "100%",
@@ -3333,8 +3361,30 @@ export default function App() {
                       color: "#fff"
                     }}
                   >
-                    ✅ Premium ativo
+                    🚀 Premium ativo
                   </button>
+
+                  {isCancelScheduled && (
+                    <p style={{
+                      fontSize: 12,
+                      opacity: 0.7,
+                      textAlign: "center",
+                      marginTop: 6
+                    }}>
+                      Seu plano será encerrado no fim do período atual.
+                    </p>
+                  )}
+
+                  {isPaymentIssue && (
+                    <p style={{
+                      fontSize: 12,
+                      color: "#ff6b6b",
+                      textAlign: "center",
+                      marginTop: 6
+                    }}>
+                      Problema no pagamento. Atualize sua forma de pagamento.
+                    </p>
+                  )}
 
                   <button
                     onClick={cancelPremium}
@@ -3345,7 +3395,7 @@ export default function App() {
                       color: dark ? "#fff" : "#111"
                     }}
                   >
-                    Cancelar
+                    {isCancelScheduled ? "Cancelamento agendado" : "Cancelar assinatura"}
                   </button>
                 </>
               )}
@@ -3371,6 +3421,20 @@ export default function App() {
             }}
           >
             <div style={premiumFeatureCard}>
+              <p style={{ marginTop: 0, marginBottom: 8, fontWeight: 800 }}>🧠 IA integrada</p>
+              <p style={{ margin: 0, fontSize: 14, opacity: 0.78, lineHeight: 1.5 }}>
+                Use IA para acelerar criação de conteúdo, melhorar cards e evoluir seu aprendizado.
+              </p>
+            </div>
+
+            <div style={premiumFeatureCard}>
+              <p style={{ marginTop: 0, marginBottom: 8, fontWeight: 800 }}>🔊 Áudio inteligente</p>
+              <p style={{ margin: 0, fontSize: 14, opacity: 0.78, lineHeight: 1.5 }}>
+                Ouça a pronúncia correta das frases e acelere seu aprendizado de idiomas.
+              </p>
+            </div>
+
+            <div style={premiumFeatureCard}>
               <p style={{ marginTop: 0, marginBottom: 8, fontWeight: 800 }}>📊 Stats avançadas</p>
               <p style={{ margin: 0, fontSize: 14, opacity: 0.78, lineHeight: 1.5 }}>
                 Visualize evolução cognitiva, retenção, estabilidade e métricas mais profundas de aprendizado.
@@ -3388,13 +3452,6 @@ export default function App() {
               <p style={{ marginTop: 0, marginBottom: 8, fontWeight: 800 }}>🏅 Medalhas e progresso</p>
               <p style={{ margin: 0, fontSize: 14, opacity: 0.78, lineHeight: 1.5 }}>
                 Desbloqueie medalhas por consistência e transforme seu estudo em uma jornada recompensadora.
-              </p>
-            </div>
-
-            <div style={premiumFeatureCard}>
-              <p style={{ marginTop: 0, marginBottom: 8, fontWeight: 800 }}>🧠 IA integrada</p>
-              <p style={{ margin: 0, fontSize: 14, opacity: 0.78, lineHeight: 1.5 }}>
-                Use IA para acelerar criação de conteúdo, melhorar cards e evoluir seu aprendizado.
               </p>
             </div>
 

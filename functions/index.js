@@ -341,6 +341,8 @@ exports.stripeWebhook = onRequest(
 
         const uid = session.metadata?.uid;
         const email = session.metadata?.email;
+        const customerId = session.customer || null;
+        const subscriptionId = session.subscription || null;
 
         if (!uid) {
           logger.error("UID ausente na metadata da Checkout Session.", {
@@ -361,7 +363,12 @@ exports.stripeWebhook = onRequest(
               status: "active",
               source: "stripe",
               customerEmail: email || null,
+              stripeCustomerId: customerId,
+              stripeSubscriptionId: subscriptionId,
               stripeCheckoutSessionId: session.id || null,
+              cancelAtPeriodEnd: false,
+              currentPeriodEnd: null,
+              lastInvoiceStatus: "paid",
               updatedAt: new Date().toISOString(),
             },
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -373,7 +380,162 @@ exports.stripeWebhook = onRequest(
           uid,
           email,
           sessionId: session.id,
+          customerId,
+          subscriptionId,
         });
+      }
+
+      if (event.type === "customer.subscription.updated") {
+        const subscription = event.data.object;
+
+        const subscriptionId = subscription.id;
+        const customerId = subscription.customer || null;
+        const status = subscription.status || "inactive";
+        const cancelAtPeriodEnd = !!subscription.cancel_at_period_end;
+        const currentPeriodEnd = subscription.current_period_end
+          ? new Date(subscription.current_period_end * 1000).toISOString()
+          : null;
+
+        const usersSnapshot = await admin
+          .firestore()
+          .collection("users")
+          .where("subscription.stripeSubscriptionId", "==", subscriptionId)
+          .limit(1)
+          .get();
+
+        if (usersSnapshot.empty) {
+          logger.warn("Usuário não encontrado para subscription.updated", {
+            subscriptionId,
+            customerId,
+          });
+        } else {
+          const userDoc = usersSnapshot.docs[0];
+          const userRef = userDoc.ref;
+
+          const isActiveLike =
+            status === "active" ||
+            status === "trialing" ||
+            status === "past_due";
+
+          await userRef.set(
+            {
+              plan: isActiveLike ? "premium" : "free",
+              subscription: {
+                plan: isActiveLike ? "premium" : "free",
+                status,
+                source: "stripe",
+                stripeCustomerId: customerId,
+                stripeSubscriptionId: subscriptionId,
+                cancelAtPeriodEnd,
+                currentPeriodEnd,
+                updatedAt: new Date().toISOString(),
+              },
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+
+          logger.info("Assinatura atualizada com sucesso.", {
+            uid: userDoc.id,
+            subscriptionId,
+            status,
+            cancelAtPeriodEnd,
+            currentPeriodEnd,
+          });
+        }
+      }
+
+      if (event.type === "customer.subscription.deleted") {
+        const subscription = event.data.object;
+
+        const subscriptionId = subscription.id;
+        const customerId = subscription.customer || null;
+
+        const usersSnapshot = await admin
+          .firestore()
+          .collection("users")
+          .where("subscription.stripeSubscriptionId", "==", subscriptionId)
+          .limit(1)
+          .get();
+
+        if (usersSnapshot.empty) {
+          logger.warn("Usuário não encontrado para subscription.deleted", {
+            subscriptionId,
+            customerId,
+          });
+        } else {
+          const userDoc = usersSnapshot.docs[0];
+          const userRef = userDoc.ref;
+
+          await userRef.set(
+            {
+              plan: "free",
+              subscription: {
+                plan: "free",
+                status: "inactive",
+                source: "stripe",
+                stripeCustomerId: customerId,
+                stripeSubscriptionId: subscriptionId,
+                cancelAtPeriodEnd: false,
+                currentPeriodEnd: null,
+                updatedAt: new Date().toISOString(),
+              },
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+
+          logger.info("Assinatura removida com sucesso.", {
+            uid: userDoc.id,
+            subscriptionId,
+          });
+        }
+      }
+
+      if (event.type === "invoice.payment_failed") {
+        const invoice = event.data.object;
+
+        const subscriptionId = invoice.subscription || null;
+        const customerId = invoice.customer || null;
+
+        if (subscriptionId) {
+          const usersSnapshot = await admin
+            .firestore()
+            .collection("users")
+            .where("subscription.stripeSubscriptionId", "==", subscriptionId)
+            .limit(1)
+            .get();
+
+          if (usersSnapshot.empty) {
+            logger.warn("Usuário não encontrado para invoice.payment_failed", {
+              subscriptionId,
+              customerId,
+            });
+          } else {
+            const userDoc = usersSnapshot.docs[0];
+            const userRef = userDoc.ref;
+
+            await userRef.set(
+              {
+                subscription: {
+                  status: "past_due",
+                  source: "stripe",
+                  stripeCustomerId: customerId,
+                  stripeSubscriptionId: subscriptionId,
+                  lastInvoiceStatus: "payment_failed",
+                  updatedAt: new Date().toISOString(),
+                },
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              },
+              { merge: true }
+            );
+
+            logger.info("Falha de pagamento registrada.", {
+              uid: userDoc.id,
+              subscriptionId,
+            });
+          }
+        }
       }
 
       res.status(200).send("Evento recebido com sucesso.");
