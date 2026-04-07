@@ -597,6 +597,28 @@ export default function App() {
     }
   }
 
+  function normalizeCardLang(text, aiLang, fallbackLang) {
+    if (!text) return fallbackLang || "unknown";
+
+    const normalizedAiLang = (aiLang || "").trim();
+
+    // se a IA marcou português, aceita
+    if (normalizedAiLang === "pt-BR") return "pt-BR";
+
+    // heurística simples para português
+    const looksPortuguese =
+      /[ãõçáàâéêíóôõú]/i.test(text) ||
+      /\b(o|a|os|as|um|uma|de|da|do|das|dos|que|como|para|com|não|por|em)\b/i.test(text);
+
+    if (looksPortuguese) return "pt-BR";
+
+    // se a IA mandou algum idioma e o texto não parece português, aceita
+    if (normalizedAiLang) return normalizedAiLang;
+
+    // fallback final
+    return fallbackLang || "unknown";
+  }
+
   async function handleSaveAIDeck() {
     try {
       console.log("aiPreview:", aiPreview);
@@ -632,8 +654,8 @@ export default function App() {
           id: `${newDeckRef.id}-card-${index + 1}`,
           question: card.front,
           answer: card.back,
-          questionLang: card.frontLang || "unknown",
-          answerLang: card.backLang || "unknown",
+          questionLang: normalizeCardLang(card.front, card.frontLang, language),
+          answerLang: normalizeCardLang(card.back, card.backLang, "pt-BR"),
           repetition: 0,
           interval: 0,
           ease: 2.5,
@@ -822,8 +844,16 @@ export default function App() {
     }
   }
 
-  function shouldSpeak(lang) {
-    return lang && lang !== "pt-BR";
+  function shouldSpeak(lang, text = "") {
+    if (!lang || lang === "pt-BR") return false;
+
+    const looksPortuguese =
+      /[ãõçáàâéêíóôõú]/i.test(text) ||
+      /\b(o|a|os|as|um|uma|de|da|do|das|dos|que|como|para|com|não|por|em)\b/i.test(text);
+
+    if (looksPortuguese) return false;
+
+    return true;
   }
 
   useEffect(() => {
@@ -2074,7 +2104,7 @@ export default function App() {
                   ? card.answerLang
                   : card.questionLang;
 
-                if (lang && lang !== "pt-BR") {
+                if (shouldSpeak(lang, text)) {
                   speakWithAI(text, lang);
                 }
               }}
