@@ -1314,16 +1314,43 @@ export default function App() {
   }
 
   async function handleLogin() {
-    if (!email || !password) return;
+    if (!email || !password) {
+      showToast("Preencha email e senha", "error");
+      return;
+    }
 
     try {
       await signInWithEmailAndPassword(auth, email, password);
+
       showToast("Login realizado", "success");
       setEmail("");
       setPassword("");
     } catch (error) {
       console.error("Erro no login:", error);
-      showToast("Erro ao fazer login");
+
+      let message = "Erro ao fazer login";
+
+      switch (error.code) {
+        case "auth/invalid-credential":
+          message = "Email ou senha incorretos";
+          break;
+        case "auth/user-not-found":
+          message = "Usuário não encontrado";
+          break;
+        case "auth/wrong-password":
+          message = "Senha incorreta";
+          break;
+        case "auth/too-many-requests":
+          message = "Muitas tentativas. Tente novamente mais tarde";
+          break;
+        case "auth/invalid-email":
+          message = "Email inválido";
+          break;
+        default:
+          message = "Erro ao fazer login";
+      }
+
+      showToast(message, "error");
     }
   }
 
@@ -1362,14 +1389,14 @@ export default function App() {
   }
 
   async function updateCards(cards) {
-    if (!activeDeckId) return;
+    if (!activeDeckId) return false;
 
     if (isPresetDeck) {
       showToast("Este é um deck padrão. Adicione-o à sua conta para salvar progresso");
-      return;
+      return false;
     }
 
-    if (!user) return;
+    if (!user) return false;
 
     try {
       await updateDoc(
@@ -1385,9 +1412,12 @@ export default function App() {
           String(d.id) === String(activeDeckId) ? { ...d, cards } : d
         )
       );
+
+      return true;
     } catch (error) {
       console.error("Erro ao atualizar cartas:", error);
-      showToast("Erro ao salvar cartas");
+      showToast("Erro ao salvar cartas", "error");
+      return false;
     }
   }
 
@@ -1573,7 +1603,7 @@ export default function App() {
     setStreak(currentStreak);
   }
 
-  function rate(quality) {
+  async function rate(quality) {
     const card = session[index];
     const responseTime = Date.now() - startTime;
 
@@ -1601,7 +1631,9 @@ export default function App() {
       c.id === card.id ? updatedCard : c
     );
 
-    updateCards(updated);
+    const saved = await updateCards(updated);
+    if (!saved) return;
+
     setTodayCount(prev => prev + 1);
 
     // 🔥 Atualiza streak quando faz pelo menos 1 review no dia
@@ -1631,7 +1663,9 @@ export default function App() {
       ? cards.reduce((sum, c) => sum + calculateRetention(c), 0) / cards.length
       : 0;
 
-  const allReviews = cards.flatMap(c => c.reviewHistory || []);
+  const allReviews = allDecks.flatMap(deck =>
+    (deck.cards || []).flatMap(card => card.reviewHistory || [])
+  );
 
   const averageResponseTime =
     allReviews.length > 0
@@ -1677,6 +1711,14 @@ export default function App() {
     hardRate
   });
 
+  function getLocalDateKey(dateInput) {
+    const date = new Date(dateInput);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
   function getWeeklyData() {
     const today = new Date();
     const data = [];
@@ -1684,11 +1726,13 @@ export default function App() {
     for (let i = 6; i >= 0; i--) {
       const day = new Date();
       day.setDate(today.getDate() - i);
-      const dayString = day.toISOString().slice(0, 10);
 
-      const count = allReviews.filter(r =>
-        r.date.slice(0, 10) === dayString
-      ).length;
+      const dayString = getLocalDateKey(day);
+
+      const count = allReviews.filter(r => {
+        if (!r?.date) return false;
+        return getLocalDateKey(r.date) === dayString;
+      }).length;
 
       data.push({
         label: day.toLocaleDateString("pt-BR", { weekday: "short" }),
@@ -1717,7 +1761,7 @@ export default function App() {
     padding: 20,
     boxSizing: "border-box",
     overflowX: "hidden",
-    fontFamily: "sans-serif",
+    fontFamily: "'Inter', sans-serif",
     background: dark
       ? "linear-gradient(180deg, #0f0f14, #1a1a22)"
       : "#f2f2f2",
@@ -1870,22 +1914,24 @@ export default function App() {
     border: dark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.06)"
   };
   const headerBox = {
-    padding: 20,
-    borderRadius: 20,
+    padding: "16px 18px",
+    borderRadius: 24,
 
     background: dark
-      ? "linear-gradient(135deg, #1e1e1e, #121212)"
-      : "linear-gradient(135deg, #ffffff, #f3f4f6)",
+      ? "linear-gradient(135deg, #1c1c1c, #121212)"
+      : "linear-gradient(135deg, #ffffff, #f8fafc)",
 
     border: dark
-      ? "1px solid rgba(255,255,255,0.08)"
-      : "1px solid rgba(0,0,0,0.06)",
+      ? "1px solid rgba(255,255,255,0.06)"
+      : "1px solid rgba(0,0,0,0.05)",
 
     boxShadow: dark
-      ? "0 20px 50px rgba(0,0,0,0.4)"
-      : "0 20px 50px rgba(0,0,0,0.08)",
+      ? "0 10px 30px rgba(0,0,0,0.35)"
+      : "0 10px 30px rgba(0,0,0,0.06)",
 
-    backdropFilter: "blur(8px)"
+    backdropFilter: "blur(10px)",
+
+    marginBottom: 10
   };
 
   const headerTitle = {
@@ -1924,8 +1970,22 @@ export default function App() {
         }}
       >
         <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 28, marginBottom: 10 }}>🧠</div>
-          <p style={{ margin: 0, opacity: 0.8 }}>Carregando sua conta...</p>
+          <img
+            src="/logo-192.png"
+            alt="Don't Forget It logo"
+            style={{
+              width: 48,
+              height: 48,
+              objectFit: "contain",
+              borderRadius: 12,
+              marginBottom: 12,
+              opacity: 0.9
+            }}
+          />
+
+          <p style={{ margin: 0, opacity: 0.8 }}>
+            Carregando sua conta...
+          </p>
         </div>
       </div>
     );
@@ -1943,6 +2003,34 @@ export default function App() {
           padding: 20
         }}
       >
+        {toast && (
+          <div
+            style={{
+              position: "fixed",
+              bottom: 30,
+              left: "50%",
+              transform: "translateX(-50%)",
+              background:
+                toast.type === "success"
+                  ? "linear-gradient(135deg, #7C5CFF, #5A8BFF)"
+                  : "rgba(0,0,0,0.85)",
+              color: "#fff",
+              padding: "14px 20px",
+              borderRadius: 14,
+              fontSize: 14,
+              fontWeight: 600,
+              boxShadow: "0 12px 40px rgba(0,0,0,0.3)",
+              zIndex: 10001,
+              opacity: 1,
+              animation: "fadeInUp 0.4s ease",
+              maxWidth: "90%",
+              textAlign: "center"
+            }}
+          >
+            {toast.message}
+          </div>
+        )}
+
         <div
           style={{
             width: "100%",
@@ -1956,7 +2044,20 @@ export default function App() {
             textAlign: "center"
           }}
         >
-          <div style={{ fontSize: 46, marginBottom: 10 }}>🧠</div>
+          <div style={{ marginBottom: 14 }}>
+            <img
+              src="/logo-192.png"
+              alt="Don't Forget It logo"
+              style={{
+                width: 56,
+                height: 56,
+                objectFit: "contain",
+                borderRadius: 14,
+                display: "block",
+                margin: "0 auto"
+              }}
+            />
+          </div>
 
           <h1 style={{ margin: 0, fontSize: 28, fontWeight: 900 }}>
             Don't Forget It
@@ -2273,8 +2374,24 @@ export default function App() {
 `}
       </style>
       <div style={headerBox}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 14,
+            padding: "2px 0"
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              minWidth: 0,
+              flex: 1
+            }}
+          >
             <img
               src="/logo-192.png"
               alt="Don't Forget It logo"
@@ -2282,119 +2399,91 @@ export default function App() {
                 width: 36,
                 height: 36,
                 objectFit: "contain",
-                filter: "drop-shadow(0 0 10px rgba(124, 58, 237, 0.45))",
+                borderRadius: 10,
                 flexShrink: 0
               }}
             />
 
-            <div>
-              <h1
-                style={{
-                  fontSize: 30,
-                  margin: 0,
-                  fontWeight: 900,
-                  letterSpacing: -0.5,
-                  color: dark ? "#fff" : "#111"
-                }}
-              >
-                Don't Forget It
-              </h1>
-
-              <p
-                style={{
-                  opacity: 0.72,
-                  marginTop: 6,
-                  marginBottom: 0,
-                  fontSize: 13,
-                  color: dark ? "#ccc" : "#555"
-                }}
-              >
-                Treine sua mente. Evolua todos os dias.
-              </p>
-            </div>
+            <h1
+              style={{
+                fontSize: 18,
+                margin: 0,
+                fontWeight: 900,
+                letterSpacing: -0.8,
+                color: dark ? "#fff" : "#111",
+                lineHeight: 1.2,
+                paddingBottom: 1,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              Don't Forget It
+            </h1>
           </div>
 
-          <button
-            onClick={() => setShowSettings(true)}
-            style={{
-              border: "none",
-              background: "transparent",
-              fontSize: 20,
-              cursor: "pointer"
-            }}
-          >
-            ⚙️
-          </button>
-
-
-          <button
-            onClick={() => setDark(!dark)}
-            style={{
-              border: "none",
-              cursor: "pointer",
-              borderRadius: 14,
-              padding: "10px 12px",
-              fontWeight: 900,
-              fontSize: 12,
-              background: dark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
-              color: dark ? "#fff" : "#000"
-            }}
-          >
-            {dark ? "🌙" : "☀️"}
-          </button>
-        </div>
-
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14, gap: 12 }}>
-          <p style={{ margin: 0, opacity: 0.8, fontSize: 13 }}>
-            <strong>{user.email}</strong>
-          </p>
-
-          <button
-            onClick={handleLogout}
-            style={{
-              ...button,
-              background: dark
-                ? "rgba(255,255,255,0.06)"
-                : "rgba(0,0,0,0.04)",
-              color: dark ? "#fff" : "#111",
-              border: dark
-                ? "1px solid rgba(255,255,255,0.08)"
-                : "1px solid rgba(0,0,0,0.08)",
-              boxShadow: dark
-                ? "none"
-                : "0 6px 20px rgba(0,0,0,0.06)",
-              width: "auto",
-              padding: "10px 14px"
-            }}
-          >
-            Sair
-          </button>
-        </div>
-
-        {user && (
           <div
             style={{
-              marginTop: 16,
-              padding: 14,
-              borderRadius: 16,
-              background: dark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
-              border: dark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.06)"
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flexShrink: 0
             }}
           >
-            <p style={{ marginTop: 0, marginBottom: 10, fontWeight: 800 }}>
-              Plano atual
-            </p>
+            <button
+              onClick={() => setShowSettings(true)}
+              title="Configurações"
+              style={{
+                width: 38,
+                height: 38,
+                border: "none",
+                borderRadius: 12,
+                background: dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)",
+                fontSize: 18,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0
+              }}
+            >
+              ⚙️
+            </button>
 
-            <p style={{ marginTop: 0, marginBottom: 0, fontSize: 14, opacity: 0.8 }}>
-              Plano: <strong>{currentPlan}</strong> | Status: <strong>{subscriptionStatus}</strong>
-            </p>
+            <button
+              onClick={() => setDark(!dark)}
+              title="Alternar tema"
+              style={{
+                width: 38,
+                height: 38,
+                border: "none",
+                borderRadius: 12,
+                background: dark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
+                color: dark ? "#fff" : "#000",
+                fontSize: 16,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0
+              }}
+            >
+              {dark ? "🌙" : "☀️"}
+            </button>
           </div>
-        )}
-
+        </div>
 
         {activeDeck && (
           <>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 14, gap: 10 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginTop: 14,
+                gap: 10
+              }}
+            >
               <div
                 style={{
                   display: "inline-flex",
@@ -2780,28 +2869,74 @@ export default function App() {
       )}
 
       {/* ABA: ADICIONAR */}
-      {activeDeck && tab === "add" && (
-        <div style={{ ...box, ...formContainer }}>
-          <h3>➕ {t("addCardTitle")}</h3>
-          <textarea
-            value={front}
-            onChange={e => setFront(e.target.value)}
-            placeholder={t("question")}
-            style={{ ...inputStyle, minHeight: 80, resize: "none" }}
-          />
-          <textarea
-            value={back}
-            onChange={e => setBack(e.target.value)}
-            placeholder={t("answer")}
-            style={{ ...inputStyle, minHeight: 80, resize: "none" }}
-          />
-          <button
-            onClick={addCard}
-            style={{ ...button, background: "#9C27B0", color: "#fff" }}
-          >
-            {t("addCard")}
-          </button>
-        </div>
+      {tab === "add" && (
+        activeDeck ? (
+          <div style={{ ...box, ...formContainer }}>
+            <h3>➕ {t("addCardTitle")}</h3>
+
+            <textarea
+              value={front}
+              onChange={e => setFront(e.target.value)}
+              placeholder={t("question")}
+              style={{ ...inputStyle, minHeight: 80, resize: "none" }}
+            />
+
+            <textarea
+              value={back}
+              onChange={e => setBack(e.target.value)}
+              placeholder={t("answer")}
+              style={{ ...inputStyle, minHeight: 80, resize: "none" }}
+            />
+
+            <button
+              onClick={addCard}
+              style={{ ...button, background: "#9C27B0", color: "#fff" }}
+            >
+              {t("addCard")}
+            </button>
+          </div>
+        ) : (
+          <div style={{ ...box, ...formContainer }}>
+            <h3>➕ {t("addCardTitle")}</h3>
+
+            <p style={{ marginTop: 0, opacity: 0.82, lineHeight: 1.6 }}>
+              Nenhum deck foi selecionado ainda.
+            </p>
+
+            <div
+              style={{
+                marginTop: 14,
+                padding: 14,
+                borderRadius: 14,
+                background: dark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
+                border: dark
+                  ? "1px solid rgba(255,255,255,0.08)"
+                  : "1px solid rgba(0,0,0,0.06)"
+              }}
+            >
+              <p style={{ marginTop: 0, marginBottom: 8, fontWeight: 700 }}>
+                Selecione um deck para começar
+              </p>
+
+              <p style={{ margin: 0, opacity: 0.8, lineHeight: 1.5 }}>
+                Escolha um deck na aba de decks para adicionar cartas manualmente.
+              </p>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
+              <button
+                onClick={() => setTab("decks")}
+                style={{
+                  ...button,
+                  width: "auto",
+                  padding: "12px 16px"
+                }}
+              >
+                Ir para Decks
+              </button>
+            </div>
+          </div>
+        )
       )}
 
       {/* ABA: HOJE */}
@@ -3180,7 +3315,7 @@ export default function App() {
       )}
 
       {/* ABA: STATS */}
-      {activeDeck && tab === "stats" && (
+      {tab === "stats" && (
         <>
           {canUseAdvancedStats ? (
             <div style={box}>
@@ -3210,8 +3345,14 @@ export default function App() {
                 </span>
               </div>
 
+              <p style={{ marginTop: 0, opacity: 0.82, lineHeight: 1.6 }}>
+                {activeDeck
+                  ? "Esses dados mostram como sua memória está evoluindo com base nas suas revisões."
+                  : "Esses dados mostram sua evolução geral no app, mesmo sem um deck selecionado no momento."}
+              </p>
+
               <p>
-                🏆  {t("level")}: <strong>{getCognitiveLevel(averageStability)}</strong>
+                🏆 {t("level")}: <strong>{getCognitiveLevel(averageStability)}</strong>
               </p>
               <p>🧠 {t("averageStability")}: {averageStability.toFixed(2)}</p>
               <p>📊 {t("averageRetention")}: {(averageRetention * 100).toFixed(1)}%</p>
@@ -3238,7 +3379,13 @@ export default function App() {
               </div>
             </div>
           ) : (
-            <div style={box}>
+            <div
+              style={{
+                ...box,
+                position: "relative",
+                overflow: "hidden"
+              }}
+            >
               <div
                 style={{
                   display: "flex",
@@ -3265,73 +3412,112 @@ export default function App() {
                 </span>
               </div>
 
-              <p style={{ marginTop: 0, opacity: 0.82, lineHeight: 1.6 }}>
-                Desbloqueie análises mais profundas sobre sua memória e seu desempenho
-                com métricas cognitivas avançadas.
-              </p>
-
+              {/* Conteúdo realçado, mas bloqueado */}
               <div
                 style={{
-                  marginTop: 14,
-                  padding: 12,
-                  borderRadius: 14,
-                  background: dark ? "rgba(255,215,0,0.08)" : "rgba(255,215,0,0.12)",
-                  border: "1px solid rgba(255,215,0,0.22)"
+                  filter: "blur(5px)",
+                  opacity: 0.55,
+                  pointerEvents: "none",
+                  userSelect: "none"
                 }}
               >
-                <p
+                <p style={{ marginTop: 0 }}>
+                  🏆 Nível: <strong>Avançado 🧠</strong>
+                </p>
+                <p>🧠 Estabilidade média: 12.84</p>
+                <p>📊 Retenção média: 87.3%</p>
+                <p>⚡ Tempo médio de resposta: 2.14s</p>
+
+                <hr
                   style={{
-                    marginTop: 0,
-                    marginBottom: 8,
-                    fontSize: 14,
-                    fontWeight: 700,
-                    color: dark ? "#FFD76A" : "#8A6300"
+                    border: "none",
+                    borderTop: dark
+                      ? "1px solid rgba(255,255,255,0.10)"
+                      : "1px solid rgba(0,0,0,0.08)",
+                    margin: "14px 0"
+                  }}
+                />
+
+                <div
+                  style={{
+                    fontSize: 13,
+                    lineHeight: 1.4,
+                    opacity: 0.9
                   }}
                 >
-                  Inclui no Premium:
-                </p>
-
-                <p style={{ margin: "4px 0", fontSize: 14 }}>• Nível cognitivo</p>
-                <p style={{ margin: "4px 0", fontSize: 14 }}>• Estabilidade média</p>
-                <p style={{ margin: "4px 0", fontSize: 14 }}>• Retenção média</p>
-                <p style={{ margin: "4px 0", fontSize: 14 }}>• Tempo médio de resposta</p>
-                <p style={{ margin: "4px 0", fontSize: 14 }}>• Insight automático</p>
+                  <strong>Insight:</strong> Sua retenção está consistente, mas o tempo de resposta indica que algumas revisões ainda exigem mais esforço mental.
+                </div>
               </div>
 
-              <button
-                onClick={() => setTab("premium")}
+              {/* Overlay */}
+              <div
                 style={{
-                  ...button,
-                  marginTop: 14,
-                  background: "linear-gradient(135deg, #7C5CFF, #5A8BFF)",
-                  color: "#fff",
-                  boxShadow: "0 8px 24px rgba(124,92,255,0.22)"
+                  position: "absolute",
+                  inset: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  textAlign: "center",
+                  padding: 20,
+                  backdropFilter: "blur(2px)"
                 }}
               >
-                ✨ Ver Premium
-              </button>
+                <div style={{ fontSize: 24, marginBottom: 8 }}>🔒</div>
+
+                <p style={{ margin: 0, fontWeight: 800, fontSize: 16 }}>
+                  Estatísticas avançadas
+                </p>
+
+                <p style={{ marginTop: 8, marginBottom: 0, opacity: 0.82, lineHeight: 1.5 }}>
+                  Desbloqueie análises profundas da sua memória, desempenho e evolução cognitiva.
+                </p>
+
+                <button
+                  onClick={() => setTab("premium")}
+                  style={{
+                    ...button,
+                    marginTop: 14,
+                    background: "linear-gradient(135deg, #7C5CFF, #5A8BFF)",
+                    color: "#fff",
+                    boxShadow: "0 8px 24px rgba(124,92,255,0.22)",
+                    width: "auto",
+                    padding: "12px 18px"
+                  }}
+                >
+                  ✨ Ver Premium
+                </button>
+              </div>
             </div>
           )}
 
-          <div style={box}>
-            <h3>📈 Semana</h3>
-            <div style={{ display: "flex", alignItems: "flex-end", height: 120 }}>
-              {weeklyData.map((d, i) => (
-                <div key={i} style={{ flex: 1, textAlign: "center" }}>
-                  <div
-                    style={{
-                      height: `${maxWeekly > 0 ? (d.count / maxWeekly) * 100 : 0}%`,
-                      background: "#FF9800",
-                      margin: "0 4px",
-                      borderRadius: 6,
-                      transition: "0.3s"
-                    }}
-                  />
-                  <small>{d.label}</small>
-                </div>
-              ))}
+          {canUseAdvancedStats && (activeDeck || weeklyData?.some(d => d.count > 0)) && (
+            <div style={box}>
+              <h3>📈 Semana</h3>
+              <div style={{ display: "flex", alignItems: "flex-end", height: 120 }}>
+                {weeklyData.map((d, i) => (
+                  <div key={i} style={{ flex: 1, textAlign: "center" }}>
+                    <small style={{ display: "block", marginBottom: 6, opacity: 0.75 }}>
+                      {d.count}
+                    </small>
+
+                    <div
+                      style={{
+                        height: d.count > 0 ? `${maxWeekly > 0 ? (d.count / maxWeekly) * 100 : 0}%` : 0,
+                        minHeight: d.count > 0 ? 8 : 0,
+                        background: "linear-gradient(180deg, #7C5CFF, #5A8BFF)",
+                        margin: "0 4px",
+                        borderRadius: 6,
+                        transition: "0.3s"
+                      }}
+                    />
+
+                    <small>{d.label}</small>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </>
       )}
 
@@ -3766,6 +3952,87 @@ export default function App() {
                 <option value="pt">Português</option>
                 <option value="en">English</option>
               </select>
+            </div>
+
+            <div
+              style={{
+                marginTop: 16,
+                padding: 14,
+                borderRadius: 16,
+                background: dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
+                border: dark ? "1px solid rgba(255,255,255,0.10)" : "1px solid rgba(0,0,0,0.08)"
+              }}
+            >
+              <div style={{ fontSize: 12, fontWeight: 800, opacity: 0.75 }}>
+                👤 Conta
+              </div>
+
+              <div style={{ marginTop: 8, fontSize: 14, opacity: 0.8, lineHeight: 1.5 }}>
+                Gerencie as informações da sua conta.
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, opacity: 0.7, marginBottom: 6 }}>
+                  Email logado
+                </div>
+
+                <div
+                  style={{
+                    ...input,
+                    marginTop: 0,
+                    background: dark ? "rgba(255,255,255,0.03)" : "#fff",
+                    color: dark ? "#fff" : "#111",
+                    border: dark
+                      ? "1px solid rgba(255,255,255,0.08)"
+                      : "1px solid rgba(0,0,0,0.08)",
+                    wordBreak: "break-word",
+                    display: "flex",
+                    alignItems: "center"
+                  }}
+                >
+                  {user?.email || "—"}
+                </div>
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, opacity: 0.7, marginBottom: 6 }}>
+                  Tipo de conta
+                </div>
+
+                <div
+                  style={{
+                    ...input,
+                    marginTop: 0,
+                    background: dark ? "rgba(255,255,255,0.03)" : "#fff",
+                    color: dark ? "#fff" : "#111",
+                    border: dark
+                      ? "1px solid rgba(255,255,255,0.08)"
+                      : "1px solid rgba(0,0,0,0.08)",
+                    display: "flex",
+                    alignItems: "center"
+                  }}
+                >
+                  Plano: <strong style={{ marginLeft: 4 }}>{currentPlan}</strong>
+                  <span style={{ opacity: 0.6, margin: "0 6px" }}>|</span>
+                  Status: <strong style={{ marginLeft: 4 }}>{subscriptionStatus}</strong>
+                </div>
+              </div>
+
+              <button
+                onClick={handleLogout}
+                style={{
+                  ...button,
+                  marginTop: 12,
+                  background: dark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
+                  color: dark ? "#fff" : "#111",
+                  border: dark
+                    ? "1px solid rgba(255,255,255,0.08)"
+                    : "1px solid rgba(0,0,0,0.08)",
+                  boxShadow: "none"
+                }}
+              >
+                Sair da conta
+              </button>
             </div>
           </div>
         </div>
