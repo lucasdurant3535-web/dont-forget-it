@@ -17,7 +17,7 @@ export default defineConfig({
 
       manifest: {
         name: "Don't Forget It",
-        short_name: "DFI",
+        short_name: "Don't Forget It",
         description: "O primeiro sistema de memória que se adapta ao seu cérebro em tempo real.",
         start_url: ".",
         display: "standalone",
