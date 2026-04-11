@@ -124,6 +124,22 @@ export default function App() {
   const [aiUsageInfo, setAiUsageInfo] = useState(null);
   const [authMode, setAuthMode] = useState("login");
   const [authLoading, setAuthLoading] = useState(true);
+  const [deckTopic, setDeckTopic] = useState("");
+  const [studyMode, setStudyMode] = useState("deck"); // "deck" ou "topic"
+  const [studyTopic, setStudyTopic] = useState(null);
+  const [notes, setNotes] = useState([]);
+  const [newNoteTitle, setNewNoteTitle] = useState("");
+  const [newNoteContent, setNewNoteContent] = useState("");
+  const [newNoteTopic, setNewNoteTopic] = useState("");
+  const [editingNoteId, setEditingNoteId] = useState(null);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [noteFont, setNoteFont] = useState("Inter");
+  const [openedNote, setOpenedNote] = useState(null);
+  const [isEditingOpenedNote, setIsEditingOpenedNote] = useState(false);
+  const [editedOpenedNoteContent, setEditedOpenedNoteContent] = useState("");
+  const [editedOpenedNoteTitle, setEditedOpenedNoteTitle] = useState("");
+  const [editedOpenedNoteTopic, setEditedOpenedNoteTopic] = useState("");
+
 
   const subscription = userData?.subscription || {};
 
@@ -197,6 +213,13 @@ export default function App() {
 
   const audioCacheRef = useRef({});
   const currentAudioRef = useRef(null);
+
+  const dueByTopic = getDueCardsByTopic();
+
+  const FREE_NOTES_LIMIT = 10;
+
+  const hasReachedNotesLimit =
+    !isPremium && (notes?.length || 0) >= FREE_NOTES_LIMIT;
 
   const aiFloatingButton = {
     position: "fixed",
@@ -712,10 +735,14 @@ export default function App() {
       count: 0,
     };
 
-    const isPremium =
-      userData?.plan === "premium" ||
-      userData?.subscription?.plan === "premium" ||
-      userData?.subscription?.status === "active";
+    const isPremium = Boolean(
+      userData &&
+      (
+        userData.plan === "premium" ||
+        userData.subscription?.plan === "premium" ||
+        userData.subscription?.status === "active"
+      )
+    );
 
     const FREE_LIMIT = 1;
     const PREMIUM_LIMIT = 30;
@@ -725,6 +752,7 @@ export default function App() {
 
     const limit = isPremium ? PREMIUM_LIMIT : FREE_LIMIT;
     const maxCards = isPremium ? PREMIUM_MAX_CARDS : FREE_MAX_CARDS;
+
 
     if (usage.month !== currentMonth) {
       return {
@@ -867,6 +895,314 @@ export default function App() {
     return true;
   }
 
+  function getDueCardsByTopic() {
+    const topicMap = {};
+
+    decks.forEach(deck => {
+      if (!deck.cards || !Array.isArray(deck.cards)) return;
+
+      const topic = deck.topic || "Geral";
+      const dueCards = getDue(deck.cards);
+
+      if (dueCards.length === 0) return;
+
+      if (!topicMap[topic]) {
+        topicMap[topic] = {
+          topic,
+          count: 0,
+          decks: [],
+          cards: []
+        };
+      }
+
+      topicMap[topic].count += dueCards.length;
+      topicMap[topic].decks.push(deck.id);
+      topicMap[topic].cards.push(
+        ...dueCards.map(card => ({
+          ...card,
+          deckId: deck.id,
+          deckName: deck.name,
+          topic
+        }))
+      );
+    });
+
+    return Object.values(topicMap).sort((a, b) => b.count - a.count);
+  }
+
+  function startTopicSession(topicGroup) {
+    if (!topicGroup?.cards?.length) return;
+
+    setStudyMode("topic");
+    setStudyTopic(topicGroup.topic);
+    setSession(topicGroup.cards);
+    setIndex(0);
+    setShowBack(false);
+    setStudyStarted(true);
+    setTab("study");
+    setStartTime(Date.now());
+  }
+
+  async function updateSingleCardInDeck(deckId, updatedCard) {
+    if (!deckId) return false;
+    if (!user) return false;
+
+    const targetDeck = decks.find(d => String(d.id) === String(deckId));
+    if (!targetDeck) return false;
+
+    if (targetDeck.isBuiltIn) {
+      showToast("Este é um deck padrão. Adicione-o à sua conta para salvar progresso");
+      return false;
+    }
+
+    const updatedCards = (targetDeck.cards || []).map(c =>
+      c.id === updatedCard.id ? updatedCard : c
+    );
+
+    try {
+      await updateDoc(
+        doc(db, "users", user.uid, "decks", String(deckId)),
+        {
+          cards: updatedCards,
+          updatedAt: new Date().toISOString()
+        }
+      );
+
+      setDecks(prev =>
+        prev.map(d =>
+          String(d.id) === String(deckId)
+            ? { ...d, cards: updatedCards }
+            : d
+        )
+      );
+
+      return true;
+    } catch (error) {
+      console.error("Erro ao atualizar carta no deck:", error);
+      showToast("Erro ao salvar progresso", "error");
+      return false;
+    }
+  }
+
+  function startDeckStudy(selectedDeck) {
+    if (!selectedDeck?.cards?.length) {
+      showToast("Esse deck não tem cartas ainda", "error");
+      return;
+    }
+
+    const dueCards = getDue(selectedDeck.cards);
+
+    const cardsToStudy = dueCards.length > 0 ? dueCards : selectedDeck.cards;
+
+    setStudyMode("deck");
+    setStudyTopic(null);
+    setSession(cardsToStudy);
+    setIndex(0);
+    setShowBack(false);
+    setStudyStarted(true);
+    setStartTime(Date.now());
+    setActiveDeckId(selectedDeck.id);
+    setTab("study");
+  }
+
+  async function createNote() {
+    const cleanTitle = newNoteTitle.trim();
+    const cleanContent = newNoteContent.trim();
+    const cleanTopic = newNoteTopic.trim();
+
+    if (!user) {
+      showToast("Você precisa estar logado para criar notas", "error");
+      return;
+    }
+
+    if (hasReachedNotesLimit) {
+      showToast?.("Você atingiu o limite de notas do plano gratuito ✨");
+      return;
+    }
+
+    if (!cleanTitle || !cleanContent) {
+      showToast("Preencha título e conteúdo da nota", "error");
+      return;
+    }
+
+    try {
+      const noteId = Date.now().toString();
+      const now = new Date().toISOString();
+
+      const noteData = {
+        id: noteId,
+        title: cleanTitle,
+        content: cleanContent,
+        topic: cleanTopic || "Geral",
+        font: noteFont,
+        userId: user.uid,
+        createdAt: now,
+        updatedAt: now
+      };
+
+      await setDoc(
+        doc(db, "users", user.uid, "notes", noteId),
+        noteData
+      );
+
+      setNotes(prev => [noteData, ...prev]);
+      setNewNoteTitle("");
+      setNewNoteContent("");
+      setNewNoteTopic("");
+      showToast("Nota criada com sucesso", "success");
+    } catch (error) {
+      console.error("Erro ao criar nota:", error);
+      showToast("Erro ao criar nota", "error");
+    }
+  }
+
+  function startEditNote(note) {
+    setEditingNoteId(note.id);
+    setNewNoteTitle(note.title || "");
+    setNewNoteContent(note.content || "");
+    setNewNoteTopic(note.topic || "");
+    setNoteFont(note.font || "Inter");
+  }
+
+  async function updateNoteItem() {
+    const cleanTitle = newNoteTitle.trim();
+    const cleanContent = newNoteContent.trim();
+    const cleanTopic = newNoteTopic.trim();
+
+    if (!user || !editingNoteId) return;
+
+    if (!cleanTitle || !cleanContent) {
+      showToast("Preencha título e conteúdo da nota", "error");
+      return;
+    }
+
+    try {
+      const updatedAt = new Date().toISOString();
+
+      await updateDoc(
+        doc(db, "users", user.uid, "notes", String(editingNoteId)),
+        {
+          title: cleanTitle,
+          content: cleanContent,
+          topic: cleanTopic || "Geral",
+          font: noteFont,
+          updatedAt
+        }
+      );
+
+      setNotes(prev => {
+        const updated = prev.map(note =>
+          String(note.id) === String(editingNoteId)
+            ? {
+              ...note,
+              title: cleanTitle,
+              content: cleanContent,
+              topic: cleanTopic || "Geral",
+              updatedAt
+            }
+            : note
+        );
+
+        if (openedNote && String(openedNote.id) === String(editingNoteId)) {
+          setOpenedNote(prev => ({
+            ...prev,
+            title: cleanTitle,
+            content: cleanContent,
+            topic: cleanTopic || "Geral",
+            font: noteFont,
+            updatedAt
+          }));
+        }
+
+        return updated.sort((a, b) => {
+          const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
+          const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
+          return bTime - aTime;
+        });
+      });
+
+      setEditingNoteId(null);
+      setNewNoteTitle("");
+      setNewNoteContent("");
+      setNewNoteTopic("");
+      showToast("Nota atualizada", "success");
+    } catch (error) {
+      console.error("Erro ao atualizar nota:", error);
+      showToast("Erro ao atualizar nota", "error");
+    }
+  }
+
+  async function deleteNoteItem(noteId) {
+    if (!user) return;
+
+    try {
+      await deleteDoc(doc(db, "users", user.uid, "notes", String(noteId)));
+
+      setNotes(prev => prev.filter(note => String(note.id) !== String(noteId)));
+
+      if (String(editingNoteId) === String(noteId)) {
+        setEditingNoteId(null);
+        setNewNoteTitle("");
+        setNewNoteContent("");
+        setNewNoteTopic("");
+      }
+
+      showToast("Nota excluída", "success");
+    } catch (error) {
+      console.error("Erro ao excluir nota:", error);
+      showToast("Erro ao excluir nota", "error");
+    }
+  }
+
+  function cancelNoteEditing() {
+    setEditingNoteId(null);
+    setNewNoteTitle("");
+    setNewNoteContent("");
+    setNewNoteTopic("");
+
+    if (openedNote && String(openedNote.id) === String(noteId)) {
+      setOpenedNote(null);
+      setIsEditingOpenedNote(false);
+      setEditedOpenedNoteTitle("");
+      setEditedOpenedNoteContent("");
+      setEditedOpenedNoteTopic("");
+    }
+  }
+
+  async function handleSaveOpenedNote() {
+    if (!openedNote || !user) return;
+
+    const updatedNote = {
+      ...openedNote,
+      title: editedOpenedNoteTitle.trim(),
+      content: editedOpenedNoteContent.trim(),
+      topic: editedOpenedNoteTopic.trim(),
+      font: openedNote.font || noteFont,
+      updatedAt: new Date().toISOString(),
+    };
+
+    try {
+      const noteRef = doc(db, "users", user.uid, "notes", openedNote.id);
+
+      await updateDoc(noteRef, {
+        title: updatedNote.title,
+        content: updatedNote.content,
+        topic: updatedNote.topic,
+        font: updatedNote.font,
+        updatedAt: serverTimestamp(),
+      });
+
+      setNotes((prev) =>
+        prev.map((note) => (note.id === openedNote.id ? updatedNote : note))
+      );
+
+      setOpenedNote(updatedNote);
+      setIsEditingOpenedNote(false);
+    } catch (error) {
+      console.error("Erro ao salvar nota aberta:", error);
+    }
+  }
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async currentUser => {
       setAuthLoading(true);
@@ -981,6 +1317,51 @@ export default function App() {
       window.history.replaceState({}, document.title, newUrl);
     }
   }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setNotes([]);
+      return;
+    }
+
+    const loadNotes = async () => {
+      setNotesLoading(true);
+
+      try {
+        const notesRef = collection(db, "users", user.uid, "notes");
+        const snap = await getDocs(notesRef);
+
+        const loadedNotes = snap.docs.map(docItem => ({
+          ...docItem.data(),
+          id: docItem.id
+        }));
+
+        loadedNotes.sort((a, b) => {
+          const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
+          const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
+          return bTime - aTime;
+        });
+
+        setNotes(loadedNotes);
+      } catch (error) {
+        console.error("Erro ao carregar notas:", error);
+        showToast("Erro ao carregar notas", "error");
+      } finally {
+        setNotesLoading(false);
+      }
+    };
+
+    loadNotes();
+  }, [user]);
+
+  useEffect(() => {
+    if (openedNote) {
+      setEditedOpenedNoteTitle(openedNote.title || "");
+      setEditedOpenedNoteContent(openedNote.content || "");
+      setEditedOpenedNoteTopic(openedNote.topic || "");
+      setIsEditingOpenedNote(false);
+    }
+  }, [openedNote]);
 
   // 📥 Recupera sessão parcial (se for do mesmo dia)
   useEffect(() => {
@@ -1107,6 +1488,12 @@ export default function App() {
 
   async function createDeck() {
     const cleanName = newDeck.trim();
+    const cleanTopic = deckTopic.trim();
+
+    console.log("CRIANDO DECK:", {
+      newDeck,
+      deckTopic
+    });
 
     if (!cleanName) return;
 
@@ -1131,6 +1518,7 @@ export default function App() {
       const deckData = {
         id: deckId,
         name: cleanName,
+        topic: cleanTopic || "Geral",
         cards: [],
         userId: user.uid,
         createdAt: now,
@@ -1145,6 +1533,7 @@ export default function App() {
 
       setDecks(prev => [...prev, deckData]);
       setNewDeck("");
+      setDeckTopic("");
 
       showToast("Deck criado com sucesso", "success");
     } catch (error) {
@@ -1230,6 +1619,7 @@ export default function App() {
         id: deckId,
         name: `${activeDeck.name} (Meu deck)`,
         description: activeDeck.description || "",
+        topic: deckTopic?.trim() || "Geral",
         level: activeDeck.level || "",
         isBuiltIn: false,
         sourcePresetId: activeDeck.id,
@@ -1627,16 +2017,25 @@ export default function App() {
       ]
     };
 
-    const updated = activeDeck.cards.map(c =>
-      c.id === card.id ? updatedCard : c
-    );
+    let saved = false;
 
-    const saved = await updateCards(updated);
+    if (studyMode === "topic") {
+      saved = await updateSingleCardInDeck(card.deckId, updatedCard);
+    } else {
+      const updated = activeDeck.cards.map(c =>
+        c.id === card.id ? updatedCard : c
+      );
+
+      saved = await updateCards(updated);
+    }
+
     if (!saved) return;
 
-    setTodayCount(prev => prev + 1);
+    setSession(prev =>
+      prev.map((c, i) => (i === index ? updatedCard : c))
+    );
 
-    // 🔥 Atualiza streak quando faz pelo menos 1 review no dia
+    setTodayCount(prev => prev + 1);
     updateStreak();
 
     if (index + 1 < session.length) {
@@ -1644,6 +2043,8 @@ export default function App() {
     } else {
       setSession([]);
       setStudyStarted(false);
+      setStudyMode("deck");
+      setStudyTopic(null);
       localStorage.removeItem("partialSession");
     }
   }
@@ -1956,6 +2357,51 @@ export default function App() {
     borderRadius: 10
   };
 
+  const noteInputStyle = {
+    width: "100%",
+    padding: "14px 16px",
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(255,255,255,0.04)",
+    color: "#fff",
+    fontSize: 15,
+    outline: "none",
+  };
+
+  const noteTextareaStyle = {
+    width: "100%",
+    minHeight: 360,
+    padding: "16px",
+    borderRadius: 16,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(255,255,255,0.04)",
+    color: "#fff",
+    fontSize: 16,
+    lineHeight: 1.8,
+    outline: "none",
+    resize: "vertical",
+  };
+
+  const primaryButtonStyle = {
+    border: "none",
+    borderRadius: 14,
+    padding: "12px 18px",
+    fontWeight: 700,
+    cursor: "pointer",
+    background: "linear-gradient(135deg, #7c3aed, #6366f1)",
+    color: "#fff",
+  };
+
+  const secondaryButtonStyle = {
+    border: "none",
+    borderRadius: 14,
+    padding: "12px 18px",
+    fontWeight: 700,
+    cursor: "pointer",
+    background: "#fff",
+    color: "#111",
+  };
+
   if (authLoading || (user && userDataLoading)) {
     return (
       <div
@@ -2164,8 +2610,22 @@ export default function App() {
               ⏸️ Pausar
             </button>
 
-            <div style={{ fontWeight: 900, fontSize: 22, opacity: 0.8 }}>
-              {index + 1}/{session.length}
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontWeight: 900, fontSize: 22, opacity: 0.8 }}>
+                {index + 1}/{session.length}
+              </div>
+
+              {studyMode === "topic" && (
+                <div style={{ marginTop: 6, fontSize: 13, opacity: 0.8 }}>
+                  Sessão do tópico: <strong>{studyTopic}</strong>
+                </div>
+              )}
+
+              {studyMode === "topic" && session[index]?.deckName && (
+                <div style={{ marginTop: 4, fontSize: 12, opacity: 0.7 }}>
+                  Deck: {session[index].deckName}
+                </div>
+              )}
             </div>
 
             <button
@@ -2540,13 +3000,6 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setTab("study")}
-            style={{ ...tabBtn, ...(tab === "study" ? tabBtnActive : {}) }}
-          >
-            {t("study")}
-          </button>
-
-          <button
             onClick={() => setTab("decks")}
             style={{ ...tabBtn, ...(tab === "decks" ? tabBtnActive : {}) }}
           >
@@ -2558,6 +3011,13 @@ export default function App() {
             style={{ ...tabBtn, ...(tab === "add" ? tabBtnActive : {}) }}
           >
             {t("add")}
+          </button>
+
+          <button
+            onClick={() => setTab("notes")}
+            style={{ ...tabBtn, ...(tab === "notes" ? tabBtnActive : {}) }}
+          >
+            Notas
           </button>
 
           <button
@@ -2589,6 +3049,12 @@ export default function App() {
               placeholder={t("newDeckName")}
               style={inputStyle}
             />
+            <input
+              value={deckTopic}
+              onChange={e => setDeckTopic(e.target.value)}
+              placeholder="Tópico / grupo (ex: Inglês, Espanhol, Direito Penal)"
+              style={inputStyle}
+            />
             <button
               onClick={createDeck}
               style={{ ...button, background: "#2196F3", color: "#fff" }}
@@ -2614,6 +3080,54 @@ export default function App() {
                 </option>
               ))}
             </select>
+
+            {activeDeck && (
+              <div
+                style={{
+                  ...box,
+                  marginTop: 14
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
+                    gap: 12,
+                    flexWrap: "wrap"
+                  }}
+                >
+                  <div>
+                    <h3 style={{ marginTop: 0, marginBottom: 8 }}>
+                      {activeDeck.name}
+                    </h3>
+
+                    <p style={{ margin: "0 0 6px 0", opacity: 0.8, fontSize: 14 }}>
+                      Tópico: <strong>{activeDeck.topic || "Geral"}</strong>
+                    </p>
+
+                    <p style={{ margin: 0, opacity: 0.8, fontSize: 14 }}>
+                      {getDue(activeDeck.cards || []).length > 0
+                        ? `${getDue(activeDeck.cards || []).length} para revisar`
+                        : "Você está em dia — prática livre disponível"}
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() => startDeckStudy(activeDeck)}
+                    style={{
+                      ...button,
+                      width: "auto",
+                      padding: "12px 16px",
+                      background: "linear-gradient(135deg, #7C5CFF, #5A8BFF)",
+                      color: "#fff"
+                    }}
+                  >
+                    ▶️ Estudar deck
+                  </button>
+                </div>
+              </div>
+            )}
 
             {activeDeck && !isPresetDeck && (
               <button
@@ -2939,6 +3453,469 @@ export default function App() {
         )
       )}
 
+      {/* ABA: NOTAS */}
+      {tab === "notes" && (
+        <div style={{ display: "grid", gap: 14 }}>
+          <div style={{ ...box, ...formContainer }}>
+            <h3 style={{ marginTop: 0 }}>
+              {editingNoteId ? "✏️ Editar nota" : "📝 Nova nota"}
+            </h3>
+
+            <input
+              value={newNoteTitle}
+              onChange={e => setNewNoteTitle(e.target.value)}
+              placeholder="Título da nota"
+              style={inputStyle}
+            />
+
+            <input
+              value={newNoteTopic}
+              onChange={e => setNewNoteTopic(e.target.value)}
+              placeholder="Tópico (ex: Inglês, Espanhol, Física)"
+              style={inputStyle}
+            />
+
+            <select
+              value={noteFont}
+              onChange={e => setNoteFont(e.target.value)}
+              style={inputStyle}
+            >
+              <option value="Inter">Inter</option>
+              <option value="Roboto">Roboto</option>
+              <option value="Georgia">Georgia</option>
+              <option value="Courier New">Courier New</option>
+              <option value="Poppins">Poppins</option>
+              <option value="Montserrat">Montserrat</option>
+
+              <option value="Caveat">Caveat</option>
+              <option value="Patrick Hand">Patrick Hand</option>
+              <option value="Dancing Script">Dancing Script</option>
+            </select>
+
+            <textarea
+              value={newNoteContent}
+              onChange={e => setNewNoteContent(e.target.value)}
+              placeholder="Escreva sua nota aqui..."
+              style={{
+                ...inputStyle,
+                minHeight: 160,
+                resize: "vertical",
+                fontFamily: noteFont
+              }}
+            />
+
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button
+                onClick={editingNoteId ? updateNoteItem : createNote}
+                disabled={!editingNoteId && hasReachedNotesLimit}
+                style={{
+                  ...button,
+                  background: "linear-gradient(135deg, #7C5CFF, #5A8BFF)",
+                  color: "#fff",
+                  width: "auto",
+                  padding: "12px 16px",
+                  opacity: !editingNoteId && hasReachedNotesLimit ? 0.5 : 1,
+                  cursor: !editingNoteId && hasReachedNotesLimit ? "not-allowed" : "pointer"
+                }}
+              >
+                {editingNoteId
+                  ? "Salvar alterações"
+                  : hasReachedNotesLimit
+                    ? "Limite atingido"
+                    : "Criar nota"}
+              </button>
+
+              {editingNoteId && (
+                <button
+                  onClick={cancelNoteEditing}
+                  style={{
+                    ...button,
+                    width: "auto",
+                    padding: "12px 16px"
+                  }}
+                >
+                  Cancelar
+                </button>
+              )}
+            </div>
+
+            {/* indicador de uso */}
+            {!isPremium && (
+              <div style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>
+                {notes.length}/{FREE_NOTES_LIMIT} notas usadas
+              </div>
+            )}
+            {hasReachedNotesLimit && !isPremium && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: 12,
+                  borderRadius: 12,
+                  background: "rgba(124,92,255,0.1)",
+                  border: "1px solid rgba(124,92,255,0.2)",
+                  fontSize: 13
+                }}
+              >
+                Você atingiu o limite de notas do plano gratuito.
+                <br />
+                <strong>Desbloqueie notas ilimitadas no Premium.</strong>
+              </div>
+            )}
+          </div>
+
+          <div style={box}>
+            <h3 style={{ marginTop: 0 }}>📚 Suas notas</h3>
+
+            {notesLoading ? (
+              <p style={{ opacity: 0.8 }}>Carregando notas...</p>
+            ) : notes.length === 0 ? (
+              <p style={{ opacity: 0.8, lineHeight: 1.6 }}>
+                Você ainda não criou nenhuma nota. Use essa área para organizar ideias
+                e depois transformar isso em cards.
+              </p>
+            ) : (
+              <div style={{ display: "grid", gap: 12 }}>
+                {notes.map(note => (
+                  <div
+                    key={note.id}
+                    onClick={() => setOpenedNote(note)}
+                    style={{
+                      padding: 14,
+                      borderRadius: 16,
+                      cursor: "pointer",
+                      userSelect: "none", // 👈 evita cursor de texto
+                      background: dark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
+                      border: dark
+                        ? "1px solid rgba(255,255,255,0.08)"
+                        : "1px solid rgba(0,0,0,0.06)"
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "flex-start",
+                        gap: 12,
+                        flexWrap: "wrap"
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 800, marginBottom: 6 }}>
+                          {note.title}
+                        </div>
+
+                        <div style={{ fontSize: 13, opacity: 0.72, marginBottom: 8 }}>
+                          Tópico: {note.topic || "Geral"}
+                        </div>
+
+                        <div
+                          style={{
+                            fontSize: 14,
+                            opacity: 0.86,
+                            lineHeight: 1.5,
+                            whiteSpace: "pre-wrap",
+                            fontFamily: note.font || "Inter",
+                            letterSpacing: note.font === "Courier New" ? 0.5 : 0
+                          }}
+                        >
+                          {note.content.length > 220
+                            ? `${note.content.slice(0, 220)}...`
+                            : note.content}
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startEditNote(note);
+                          }}
+                          style={{
+                            ...button,
+                            width: "auto",
+                            padding: "10px 12px"
+                          }}
+                        >
+                          Editar
+                        </button>
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteNoteItem(note.id);
+                          }}
+                          style={{
+                            ...button,
+                            width: "auto",
+                            padding: "10px 12px"
+                          }}
+                        >
+                          Excluir
+                        </button>
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            showToast("Transformar em cards com IA será o próximo passo", "success");
+                          }}
+                          style={{
+                            ...button,
+                            width: "auto",
+                            padding: "10px 12px",
+                            background: "linear-gradient(135deg, #7C5CFF, #5A8BFF)",
+                            color: "#fff"
+                          }}
+                        >
+                          Gerar cards com IA
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {openedNote && (
+        <div
+          onClick={() => {
+            setOpenedNote(null);
+            setIsEditingOpenedNote(false);
+            setEditedOpenedNoteTitle("");
+            setEditedOpenedNoteContent("");
+            setEditedOpenedNoteTopic("");
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            zIndex: 10000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="hide-scrollbar"
+            style={{
+              width: "100%",
+              maxWidth: 760,
+              maxHeight: "88vh",
+              overflowY: "auto",
+              borderRadius: 24,
+              padding: 24,
+              background: dark ? "#1b1b1f" : "#ffffff",
+              color: dark ? "#fff" : "#111",
+              border: dark
+                ? "1px solid rgba(255,255,255,0.08)"
+                : "1px solid rgba(0,0,0,0.06)",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.35)"
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                gap: 12,
+                marginBottom: 18,
+                flexWrap: "wrap"
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {!isEditingOpenedNote ? (
+                  <>
+                    <h2
+                      style={{
+                        margin: 0,
+                        marginBottom: 8,
+                        fontSize: 28,
+                        fontWeight: 900,
+                        lineHeight: 1.15
+                      }}
+                    >
+                      {openedNote.title}
+                    </h2>
+
+                    <div
+                      style={{
+                        fontSize: 13,
+                        opacity: 0.72,
+                        display: "flex",
+                        gap: 10,
+                        flexWrap: "wrap"
+                      }}
+                    >
+                      <span>Tópico: {openedNote.topic || "Geral"}</span>
+                      <span>Fonte: {openedNote.font || "Inter"}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ display: "grid", gap: 10 }}>
+                    <input
+                      value={editedOpenedNoteTitle}
+                      onChange={(e) => setEditedOpenedNoteTitle(e.target.value)}
+                      placeholder="Título da nota"
+                      style={{
+                        width: "100%",
+                        padding: "14px 16px",
+                        borderRadius: 14,
+                        border: dark
+                          ? "1px solid rgba(255,255,255,0.12)"
+                          : "1px solid rgba(0,0,0,0.10)",
+                        background: dark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
+                        color: dark ? "#fff" : "#111",
+                        fontSize: 16,
+                        fontWeight: 700,
+                        outline: "none"
+                      }}
+                    />
+
+                    <input
+                      value={editedOpenedNoteTopic}
+                      onChange={(e) => setEditedOpenedNoteTopic(e.target.value)}
+                      placeholder="Tópico"
+                      style={{
+                        width: "100%",
+                        padding: "12px 16px",
+                        borderRadius: 14,
+                        border: dark
+                          ? "1px solid rgba(255,255,255,0.12)"
+                          : "1px solid rgba(0,0,0,0.10)",
+                        background: dark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
+                        color: dark ? "#fff" : "#111",
+                        fontSize: 14,
+                        outline: "none"
+                      }}
+                    />
+
+                    <div
+                      style={{
+                        fontSize: 13,
+                        opacity: 0.72
+                      }}
+                    >
+                      Fonte: {openedNote.font || "Inter"}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  onClick={() => {
+                    setOpenedNote(null);
+                    setIsEditingOpenedNote(false);
+                    setEditedOpenedNoteTitle("");
+                    setEditedOpenedNoteContent("");
+                    setEditedOpenedNoteTopic("");
+                  }}
+                  style={{
+                    ...button,
+                    width: "auto",
+                    padding: "10px 14px"
+                  }}
+                >
+                  Fechar
+                </button>
+
+                {!isEditingOpenedNote ? (
+                  <button
+                    onClick={() => setIsEditingOpenedNote(true)}
+                    style={{
+                      ...button,
+                      width: "auto",
+                      padding: "10px 14px",
+                      background: "linear-gradient(135deg, #7C5CFF, #5A8BFF)",
+                      color: "#fff"
+                    }}
+                  >
+                    Editar nota
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => {
+                        setIsEditingOpenedNote(false);
+                        setEditedOpenedNoteTitle(openedNote?.title || "");
+                        setEditedOpenedNoteContent(openedNote?.content || "");
+                        setEditedOpenedNoteTopic(openedNote?.topic || "");
+                      }}
+                      style={{
+                        ...button,
+                        width: "auto",
+                        padding: "10px 14px"
+                      }}
+                    >
+                      Cancelar
+                    </button>
+
+                    <button
+                      onClick={handleSaveOpenedNote}
+                      style={{
+                        ...button,
+                        width: "auto",
+                        padding: "10px 14px",
+                        background: "linear-gradient(135deg, #7C5CFF, #5A8BFF)",
+                        color: "#fff"
+                      }}
+                    >
+                      Salvar
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div
+              style={{
+                padding: 22,
+                borderRadius: 20,
+                background: dark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.025)",
+                border: dark
+                  ? "1px solid rgba(255,255,255,0.06)"
+                  : "1px solid rgba(0,0,0,0.05)"
+              }}
+            >
+              {!isEditingOpenedNote ? (
+                <div
+                  style={{
+                    fontSize: 17,
+                    lineHeight: 1.8,
+                    whiteSpace: "pre-wrap",
+                    fontFamily: openedNote.font || "Inter"
+                  }}
+                >
+                  {openedNote.content}
+                </div>
+              ) : (
+                <textarea
+                  value={editedOpenedNoteContent}
+                  onChange={(e) => setEditedOpenedNoteContent(e.target.value)}
+                  placeholder="Conteúdo da nota"
+                  style={{
+                    width: "100%",
+                    minHeight: 360,
+                    border: "none",
+                    outline: "none",
+                    resize: "vertical",
+                    background: "transparent",
+                    color: dark ? "#fff" : "#111",
+                    fontSize: 16,
+                    lineHeight: 1.8,
+                    fontFamily: openedNote.font || "Inter"
+                  }}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ABA: HOJE */}
       {tab === "today" && (
         <>
@@ -3160,6 +4137,61 @@ export default function App() {
               )}
             </div>
 
+            {dueByTopic.length > 0 && (
+              <div style={{ ...box, marginTop: 14 }}>
+                <h3 style={{ marginTop: 0, marginBottom: 12 }}>📚 Revisões por tópico</h3>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {dueByTopic.map(group => (
+                    <div
+                      key={group.topic}
+                      style={{
+                        padding: 14,
+                        borderRadius: 16,
+                        background: dark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
+                        border: dark
+                          ? "1px solid rgba(255,255,255,0.08)"
+                          : "1px solid rgba(0,0,0,0.06)"
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          gap: 12,
+                          flexWrap: "wrap"
+                        }}
+                      >
+                        <div>
+                          <p style={{ margin: 0, fontWeight: 800 }}>
+                            {group.topic}
+                          </p>
+
+                          <p style={{ margin: "6px 0 0 0", opacity: 0.78, fontSize: 14 }}>
+                            {group.count} carta{group.count > 1 ? "s" : ""} para revisar
+                          </p>
+                        </div>
+
+                        <button
+                          onClick={() => startTopicSession(group)}
+                          style={{
+                            ...button,
+                            width: "auto",
+                            padding: "10px 14px",
+                            background: "linear-gradient(135deg, #7C5CFF, #5A8BFF)",
+                            color: "#fff"
+                          }}
+                        >
+                          Estudar
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Barra de progresso */}
             <div
               style={{
@@ -3195,124 +4227,6 @@ export default function App() {
         </>
       )}
 
-      {/* ABA: STUDY */}
-      {tab === "study" && (
-        <div style={box}>
-          <h3>Study</h3>
-
-          <div style={box}>
-            <h3>📚 Escolha um deck para estudar</h3>
-
-            {studyDecks.length === 0 ? (
-              <p style={{ opacity: 0.8, lineHeight: 1.5 }}>
-                Você ainda não tem decks para estudar.
-              </p>
-            ) : (
-              <div
-                className="hide-scrollbar"
-                style={{
-                  display: "grid",
-                  gap: 10,
-                  maxHeight: 210,
-                  overflowY: "auto",
-                  paddingRight: 4,
-                  marginTop: 12
-                }}
-              >
-                {studyDecks.map(deck => {
-                  const dueInDeck = (deck.cards || []).filter(card => {
-                    return (card.nextReview || nowIso) <= nowIso;
-                  }).length;
-
-                  const isSelected = String(deck.id) === String(activeDeckId);
-
-                  return (
-                    <button
-                      key={deck.id}
-                      onClick={() => setActiveDeckId(deck.id)}
-                      style={{
-                        textAlign: "left",
-                        padding: 14,
-                        borderRadius: 16,
-                        cursor: "pointer",
-                        background: isSelected
-                          ? "linear-gradient(135deg, rgba(124,92,255,0.22), rgba(90,139,255,0.16))"
-                          : dark
-                            ? "rgba(255,255,255,0.06)"
-                            : "rgba(0,0,0,0.04)",
-                        color: dark ? "#fff" : "#111",
-                        border: isSelected
-                          ? "1px solid rgba(124,92,255,0.35)"
-                          : dark
-                            ? "1px solid rgba(255,255,255,0.08)"
-                            : "1px solid rgba(0,0,0,0.06)"
-                      }}
-                    >
-                      <div style={{ fontWeight: 800, marginBottom: 6 }}>
-                        {deck.name}
-                      </div>
-
-                      <div style={{ fontSize: 13, opacity: 0.78 }}>
-                        {dueInDeck} para revisar
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            {!studyActiveDeck && studyDecks.length > 0 && (
-              <div style={box}>
-                <h3>🧠 Pronto para estudar</h3>
-                <p style={{ opacity: 0.8, lineHeight: 1.5 }}>
-                  Escolha um deck acima para começar sua sessão.
-                </p>
-              </div>
-            )}
-          </div>
-
-          <div
-            style={{
-              textAlign: "center",
-              padding: "20px 10px",
-              opacity: 0.9
-            }}
-          >
-            {dueCount === 0 ? (
-              <>
-                <div style={{ fontSize: 40, marginBottom: 10 }}>✅</div>
-                <h4 style={{ margin: 0, marginBottom: 6 }}>
-                  Você está em dia!
-                </h4>
-                <p style={{ fontSize: 13, opacity: 0.7 }}>
-                  Nenhuma carta precisa ser revisada agora.
-                </p>
-              </>
-            ) : (
-              <>
-                <div style={{ fontSize: 40, marginBottom: 10 }}>🧠</div>
-                <h4 style={{ margin: 0, marginBottom: 6 }}>
-                  {t("studyReady")}?
-                </h4>
-                <p style={{ fontSize: 13, opacity: 0.7, marginBottom: 16 }}>
-                  {t("studyMessage", { count: dueCount })}
-                </p>
-
-                <button
-                  onClick={startSession}
-                  style={{
-                    ...button,
-                    background: "linear-gradient(135deg, #7C5CFF, #5A8BFF)",
-                    color: "#fff",
-                    boxShadow: "0 8px 30px rgba(124,92,255,0.25)"
-                  }}
-                >
-                  ▶️ {t("startSession")}
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* ABA: STATS */}
       {tab === "stats" && (
