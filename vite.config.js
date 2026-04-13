@@ -16,8 +16,8 @@ export default defineConfig({
       },
 
       manifest: {
-        name: "Don't Forget It",
-        short_name: "Don't Forget It",
+        name: "Repetra",
+        short_name: "Repetra",
         description: "O primeiro sistema de memória que se adapta ao seu cérebro em tempo real.",
         start_url: ".",
         display: "standalone",

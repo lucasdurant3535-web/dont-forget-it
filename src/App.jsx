@@ -513,7 +513,7 @@ export default function App() {
     if (!("Notification" in window)) return;
     if (Notification.permission !== "granted") return;
 
-    new Notification("Don't Forget It", {
+    new Notification("Repetra", {
       body: "Hora de estudar. Sua memória precisa de consistência 🧠",
       icon: "/pwa-192x192.png"
     });
@@ -2503,7 +2503,7 @@ ${noteContent}
         <div style={{ textAlign: "center" }}>
           <img
             src="/logo-192.png"
-            alt="Don't Forget It logo"
+            alt="Repetra logo"
             style={{
               width: 48,
               height: 48,
@@ -2578,7 +2578,7 @@ ${noteContent}
           <div style={{ marginBottom: 14 }}>
             <img
               src="/logo-192.png"
-              alt="Don't Forget It logo"
+              alt="Repetra logo"
               style={{
                 width: 56,
                 height: 56,
@@ -2591,7 +2591,7 @@ ${noteContent}
           </div>
 
           <h1 style={{ margin: 0, fontSize: 28, fontWeight: 900 }}>
-            Don't Forget It
+            Repetra
           </h1>
 
           <p style={{ fontSize: 14, opacity: 0.75, marginTop: 10, marginBottom: 24 }}>
@@ -2939,7 +2939,7 @@ ${noteContent}
           >
             <img
               src="/logo-192.png"
-              alt="Don't Forget It logo"
+              alt="Repetra logo"
               style={{
                 width: 36,
                 height: 36,
@@ -2963,7 +2963,7 @@ ${noteContent}
                 textOverflow: "ellipsis",
               }}
             >
-              Don't Forget It
+              Repetra
             </h1>
           </div>
 
@@ -5036,7 +5036,7 @@ ${noteContent}
             </div>
 
             <h2 style={{ marginTop: 16, marginBottom: 10, fontSize: 28, lineHeight: 1.1 }}>
-              Agora o Don&apos;t Forget It ficou ainda mais inteligente
+              Agora o Repetra ficou ainda mais inteligente
             </h2>
 
             <p style={{ marginTop: 0, marginBottom: 18, fontSize: 15, lineHeight: 1.65, opacity: 0.82 }}>
@@ -5108,7 +5108,7 @@ ${noteContent}
                   Nosso sistema é baseado em pesquisas clássicas sobre memória, iniciadas por
                   <strong> Hermann Ebbinghaus</strong>, que demonstraram que esquecemos grande parte do que aprendemos em poucas horas ou dias — um fenômeno conhecido como <strong>curva do esquecimento</strong>.
                   <br /><br />
-                  Para combater isso, o Don’t Forget It utiliza <strong>repetição espaçada</strong>, uma técnica comprovada que agenda revisões exatamente no momento em que você está prestes a esquecer. Isso reduz drasticamente a perda de informação ao longo do tempo.
+                  Para combater isso, o Repetra utiliza <strong>repetição espaçada</strong>, uma técnica comprovada que agenda revisões exatamente no momento em que você está prestes a esquecer. Isso reduz drasticamente a perda de informação ao longo do tempo.
                   <br /><br />
                   Além disso, o sistema utiliza <strong>recuperação ativa</strong> — ou seja, você não apenas relê, mas precisa lembrar ativamente da resposta. Esse processo fortalece as conexões neurais de forma muito mais eficiente do que leitura passiva.
                   <br /><br />
@@ -5361,7 +5361,9 @@ ${noteContent}
                     }}
                   >
                     {aiLimitReached
-                      ? "⚠️ Você já usou todas as gerações disponíveis deste mês."
+                      ? isPremium
+                        ? "⚠️ Você atingiu o limite mensal de gerações do seu plano."
+                        : "⚠️ Você já usou todas as gerações disponíveis deste mês."
                       : aiUsageInfo.remaining === 1
                         ? "Você ainda tem 1 geração disponível neste mês."
                         : `Você ainda tem ${aiUsageInfo.remaining} gerações disponíveis neste mês.`}
@@ -5376,11 +5378,14 @@ ${noteContent}
                         opacity: 0.85,
                       }}
                     >
-                      Faça upgrade para continuar criando decks com IA e estudar sem travar seu ritmo.
+                      {isPremium
+                        ? "Novas gerações ficarão disponíveis no próximo ciclo."
+                        : "Faça upgrade para continuar criando decks com IA e estudar sem travar seu ritmo."}
                     </p>
                   )}
                 </div>
               )}
+
               <p
                 style={{
                   marginTop: 10,
@@ -5390,32 +5395,43 @@ ${noteContent}
                   lineHeight: 1.6,
                 }}
               >
-                Free: 1 geração por mês com até 15 cartas por deck.
-                <br />
-                ✨ Premium: até 30 gerações por mês com até 30 cartas por deck.
+                {isPremium ? (
+                  <>
+                    ✨ Premium: até 30 gerações por mês com até 30 cartas por deck.
+                  </>
+                ) : (
+                  <>
+                    Free: 1 geração por mês com até 15 cartas por deck.
+                    <br />
+                    ✨ Premium: até 30 gerações por mês com até 30 cartas por deck.
+                  </>
+                )}
               </p>
-              <button
-                onClick={() => {
-                  setAiOpen(false);
-                  setTab("premium");
-                }}
-                style={{
-                  marginTop: 12,
-                  width: "100%",
-                  padding: "12px",
-                  borderRadius: 12,
-                  border: "none",
-                  fontWeight: 800,
-                  cursor: "pointer",
-                  background: "linear-gradient(90deg,#7c5cff,#9c27b0)",
-                  color: "#fff",
-                  fontSize: 14,
-                }}
-              >
-                {aiLimitReached
-                  ? "✨ Desbloquear mais gerações com IA"
-                  : "✨ Quero mais gerações com IA"}
-              </button>
+
+              {!isPremium && (
+                <button
+                  onClick={() => {
+                    setAiOpen(false);
+                    setTab("premium");
+                  }}
+                  style={{
+                    marginTop: 12,
+                    width: "100%",
+                    padding: "12px",
+                    borderRadius: 12,
+                    border: "none",
+                    fontWeight: 800,
+                    cursor: "pointer",
+                    background: "linear-gradient(90deg,#7c5cff,#9c27b0)",
+                    color: "#fff",
+                    fontSize: 14,
+                  }}
+                >
+                  {aiLimitReached
+                    ? "✨ Desbloquear mais gerações com IA"
+                    : "✨ Quero mais gerações com IA"}
+                </button>
+              )}
             </div>
 
             {aiError && (
