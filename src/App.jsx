@@ -2029,8 +2029,10 @@ ${noteContent}
     setIndex(0);
     setShowBack(false);
     setStartTime(null);
-    setTab("today");
     setStudyStarted(false);
+    setTab("stats");
+
+    showToast("Sessão concluída 🚀", "success");
   }
 
   function nextCard(newIndex) {
@@ -2127,10 +2129,16 @@ ${noteContent}
       nextCard(index + 1);
     } else {
       setSession([]);
+      setIndex(0);
+      setShowBack(false);
+      setStartTime(null);
       setStudyStarted(false);
       setStudyMode("deck");
       setStudyTopic(null);
       localStorage.removeItem("partialSession");
+      setTab("stats");
+
+      showToast("Sessão concluída 🚀", "success");
     }
   }
 
@@ -2501,20 +2509,36 @@ ${noteContent}
         }}
       >
         <div style={{ textAlign: "center" }}>
+          <h1
+            style={{
+              margin: 0,
+              marginBottom: 12,
+              fontSize: 26,
+              fontWeight: 800,
+              letterSpacing: -0.5,
+              fontFamily: "Sora, sans-serif",
+              background: "linear-gradient(135deg, #7C5CFF, #5A8BFF)",
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent"
+            }}
+          >
+            Repetra
+          </h1>
+
           <img
             src="/logo-192.png"
             alt="Repetra logo"
             style={{
-              width: 48,
-              height: 48,
+              width: 52,
+              height: 52,
               objectFit: "contain",
-              borderRadius: 12,
-              marginBottom: 12,
-              opacity: 0.9
+              borderRadius: 14,
+              marginBottom: 14,
+              opacity: 0.95
             }}
           />
 
-          <p style={{ margin: 0, opacity: 0.8 }}>
+          <p style={{ margin: 0, opacity: 0.75, fontSize: 14 }}>
             Carregando sua conta...
           </p>
         </div>
@@ -2590,7 +2614,15 @@ ${noteContent}
             />
           </div>
 
-          <h1 style={{ margin: 0, fontSize: 28, fontWeight: 900 }}>
+          <h1
+            style={{
+              margin: 0,
+              fontSize: 28,
+              fontWeight: 800,
+              fontFamily: "Sora, sans-serif",
+              letterSpacing: -0.5
+            }}
+          >
             Repetra
           </h1>
 
@@ -2918,153 +2950,7 @@ ${noteContent}
 }
 `}
       </style>
-      <div style={headerBox}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 14,
-            padding: "2px 0"
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              minWidth: 0,
-              flex: 1
-            }}
-          >
-            <img
-              src="/logo-192.png"
-              alt="Repetra logo"
-              style={{
-                width: 36,
-                height: 36,
-                objectFit: "contain",
-                borderRadius: 10,
-                flexShrink: 0
-              }}
-            />
-
-            <h1
-              style={{
-                fontSize: 18,
-                margin: 0,
-                fontWeight: 900,
-                letterSpacing: -0.8,
-                color: dark ? "#fff" : "#111",
-                lineHeight: 1.2,
-                paddingBottom: 1,
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
-              Repetra
-            </h1>
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              flexShrink: 0
-            }}
-          >
-            <button
-              onClick={() => setShowSettings(true)}
-              title="Configurações"
-              style={{
-                width: 38,
-                height: 38,
-                border: "none",
-                borderRadius: 12,
-                background: dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)",
-                fontSize: 18,
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0
-              }}
-            >
-              ⚙️
-            </button>
-
-            <button
-              onClick={() => setDark(!dark)}
-              title="Alternar tema"
-              style={{
-                width: 38,
-                height: 38,
-                border: "none",
-                borderRadius: 12,
-                background: dark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
-                color: dark ? "#fff" : "#000",
-                fontSize: 16,
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0
-              }}
-            >
-              {dark ? "🌙" : "☀️"}
-            </button>
-          </div>
-        </div>
-
-        {activeDeck && (
-          <>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginTop: 14,
-                gap: 10
-              }}
-            >
-              <div
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "6px 10px",
-                  borderRadius: 999,
-                  fontSize: 12,
-                  fontWeight: 900,
-                  background: "rgba(76,175,80,0.14)",
-                  border: "1px solid rgba(76,175,80,0.25)",
-                  color: dark ? "#eaffea" : "#0b3d0b"
-                }}
-              >
-                <span style={{ width: 8, height: 8, borderRadius: 999, background: "#4CAF50", display: "inline-block" }} />
-                {activeDeck.name}
-              </div>
-
-              <div style={{ fontSize: 12, fontWeight: 900, opacity: 0.9 }}>
-                {getCognitiveLevel(averageStability)}
-              </div>
-            </div>
-
-            <div style={{ marginTop: 10 }}>
-              <div style={headerProgressBar}>
-                <div style={headerProgressFill} />
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 12, opacity: 0.75 }}>
-                <span>Meta diária</span>
-                <span style={{ fontWeight: 900 }}>{todayCount}/{DAILY_GOAL}</span>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
+      
       {/* Tabs (cara de app) */}
       {/* Tabs (cara de app) */}
       {!studyStarted && (
@@ -4765,18 +4651,54 @@ ${noteContent}
               style={{
                 marginTop: 10,
                 marginBottom: 16,
-                padding: 12,
-                borderRadius: 12,
+                padding: 14,
+                borderRadius: 16,
                 background: dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
                 border: dark
                   ? "1px solid rgba(255,255,255,0.10)"
                   : "1px solid rgba(0,0,0,0.08)",
-                fontSize: 14,
-                fontWeight: 700,
-                opacity: 0.9
+                display: "flex",
+                alignItems: "center",
+                gap: 12
               }}
             >
-              Versão {APP_VERSION}
+              <img
+                src="/logo-192.png"
+                alt="Repetra logo"
+                style={{
+                  width: 42,
+                  height: 42,
+                  objectFit: "contain",
+                  borderRadius: 12,
+                  flexShrink: 0
+                }}
+              />
+
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: 17,
+                    fontWeight: 800,
+                    letterSpacing: -0.4,
+                    fontFamily: "Sora, sans-serif",
+                    color: dark ? "#fff" : "#111",
+                    lineHeight: 1.1
+                  }}
+                >
+                  Repetra
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 4,
+                    fontSize: 12,
+                    opacity: 0.68,
+                    color: dark ? "#fff" : "#111"
+                  }}
+                >
+                  Versão {APP_VERSION}
+                </div>
+              </div>
             </div>
 
             <div
@@ -5498,6 +5420,32 @@ ${noteContent}
           </div>
         </div>
       )}
+      <button
+        onClick={() => setShowSettings(true)}
+        title="Configurações"
+        style={{
+          position: "fixed",
+          left: 16,
+          bottom: 90,
+          width: 58,
+          height: 58,
+          borderRadius: "50%",
+          border: "none",
+          background: dark
+            ? "linear-gradient(135deg, #23233A, #17172A)"
+            : "linear-gradient(135deg, #ffffff, #f1f3f7)",
+          color: dark ? "#fff" : "#111",
+          boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+          fontSize: 24,
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 9999
+        }}
+      >
+        ⚙️
+      </button>
     </div>
   );
 }
