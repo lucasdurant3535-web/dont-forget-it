@@ -690,8 +690,19 @@ export default function App() {
           id: `${newDeckRef.id}-card-${index + 1}`,
           question: card.front,
           answer: card.back,
-          questionLang: normalizeCardLang(card.front, card.frontLang, language),
-          answerLang: normalizeCardLang(card.back, card.backLang, "pt-BR"),
+
+          questionLang: normalizeCardLang(
+            card.front,
+            card.frontLang,
+            "pt-BR"
+          ),
+
+          answerLang: normalizeCardLang(
+            card.back,
+            card.backLang,
+            "pt-BR"
+          ),
+
           repetition: 0,
           interval: 0,
           ease: 2.5,
@@ -863,6 +874,66 @@ export default function App() {
     } catch (err) {
       console.error("Erro ao tocar áudio com IA:", err);
     }
+  }
+
+  function normalizeAICard(card, index, deckId, nowIso) {
+    const frontText = card?.front || "";
+    const backText = card?.back || "";
+
+    const frontLang = normalizeCardLang(frontText, card?.frontLang, "pt-BR");
+    const backLang = normalizeCardLang(backText, card?.backLang, "pt-BR");
+
+    return {
+      id: `${deckId}-card-${index + 1}`,
+      question: frontText,
+      answer: backText,
+      questionLang: frontLang,
+      answerLang: backLang,
+      repetition: 0,
+      interval: 0,
+      ease: 2.5,
+      stability: 1,
+      nextReview: nowIso,
+      lastReview: nowIso,
+      reviewHistory: [],
+    };
+  }
+
+  function canSpeakCardSide(card, side) {
+    const questionLang = card?.questionLang || "";
+    const answerLang = card?.answerLang || "";
+
+    const isTranslationToPortuguese =
+      answerLang === "pt-BR" && questionLang && questionLang !== "pt-BR";
+
+    const isSameLanguage =
+      questionLang &&
+      answerLang &&
+      questionLang === answerLang;
+
+    if (isTranslationToPortuguese) {
+      return side === "front";
+    }
+
+    if (isSameLanguage) {
+      return true;
+    }
+
+    return false;
+  }
+
+  function getSpeakData(card, side) {
+    if (side === "front") {
+      return {
+        text: card?.question || "",
+        lang: card?.questionLang || "",
+      };
+    }
+
+    return {
+      text: card?.answer || "",
+      lang: card?.answerLang || "",
+    };
   }
 
   function shouldSpeak(lang, text = "") {
@@ -2847,17 +2918,16 @@ ${noteContent}
             <button
               onClick={() => {
                 const card = session[index];
+                const side = showBack ? "back" : "front";
 
-                const text = showBack
-                  ? card.answer
-                  : card.question;
+                if (!canSpeakCardSide(card, side)) {
+                  return;
+                }
 
-                const lang = showBack
-                  ? card.answerLang
-                  : card.questionLang;
+                const { text, lang } = getSpeakData(card, side);
 
-                if (shouldSpeak(lang, text)) {
-                  speakWithAI(text, lang);
+                if (shouldSpeak(lang)) {
+                  speakWithAI(text);
                 }
               }}
               style={{
@@ -2950,7 +3020,7 @@ ${noteContent}
 }
 `}
       </style>
-      
+
       {/* Tabs (cara de app) */}
       {/* Tabs (cara de app) */}
       {!studyStarted && (

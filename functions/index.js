@@ -70,18 +70,23 @@ Regras obrigatórias:
 6. Os cards devem ser claros, objetivos e bons para revisão.
 7. Evite repetições, variações inúteis e conteúdo genérico.
 8. Mantenha consistência total com o tema pedido pelo usuário.
+8.1. O campo front deve sempre representar o estímulo principal de estudo, e o campo back deve sempre representar a resposta ou tradução correspondente.
 9. Se o tema for idioma:
-   - Cada carta deve conter exatamente dois lados:
-     - um no idioma alvo
-     - outro na tradução
-   - A tradução deve estar em um único idioma consistente (ex: português ou idioma nativo do usuário)
+   - Cada carta deve conter exatamente dois lados
+   - Se for um deck de tradução:
+     - front = frase no idioma alvo
+     - back = tradução em português do Brasil
+     - nunca inverta essa ordem
+   - Se for um deck no mesmo idioma:
+     - front e back devem permanecer no mesmo idioma
+     - o back deve complementar, explicar ou responder o front sem traduzir para português
    - Nunca misture idiomas no mesmo campo
-   - Nunca use palavras de outros idiomas ou alfabetos que não sejam relevantes
+   - Use apenas um idioma por campo
    - As frases devem ser naturais, úteis e contextualizadas
    - Evite palavras soltas — sempre use frases completas
-   - Mantenha consistência em todo o deck (não ficar alternando formato sem lógica)
-   - Prefira frases usadas na vida real (conversas, trabalho, viagem, etc.)
-- Evite frases artificiais ou muito literais
+   - Mantenha consistência em todo o deck
+   - Prefira frases usadas na vida real
+   - Evite frases artificiais ou traduções literais demais
 10. Se o tema for estudo teórico:
    - priorize pergunta e resposta objetivas
    - foque nos conceitos mais importantes
