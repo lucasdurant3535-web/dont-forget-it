@@ -17,7 +17,6 @@ import { generateCardsWithAI } from "./services/ai";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "./firebase"; // ou onde você inicializa
 
-import { sendPasswordResetEmail } from "firebase/auth";
 
 console.log("Auth:", auth);
 console.log("Firestore:", db);
@@ -1416,29 +1415,63 @@ ${noteContent}
   }
 
   async function handleForgotPassword() {
-    if (!email) {
-      showToast("Digite seu e-mail acima para recuperar a senha.", "error");
-
-      // 👇 foca no input automaticamente
-      document.getElementById("emailInput")?.focus();
-
-      return;
-    }
-
     try {
-      await sendPasswordResetEmail(auth, email);
+      console.log("EMAIL STATE:", email);
+      console.log("TYPE:", typeof email);
+
+      const emailInput = String(email || "").trim();
+
+      if (!emailInput) {
+        showToast("Digite seu e-mail antes de recuperar a senha.", "error");
+        return;
+      }
+
+      await sendPasswordResetEmailDirect(emailInput);
+
       showToast("📩 Email de recuperação enviado!");
     } catch (error) {
-      console.error(error);
+      console.error("ERRO RESET SENHA:", error);
+      console.error("MESSAGE:", error?.message);
 
-      if (error.code === "auth/user-not-found") {
+      if (error.message === "EMAIL_NOT_FOUND") {
         showToast("Nenhum usuário encontrado com esse e-mail.", "error");
-      } else if (error.code === "auth/invalid-email") {
+      } else if (error.message === "INVALID_EMAIL") {
         showToast("E-mail inválido.", "error");
       } else {
-        showToast("Erro ao enviar email. Tente novamente.", "error");
+        showToast(`Erro ao enviar email: ${error?.message || "desconhecido"}`, "error");
       }
     }
+  }
+
+  async function sendPasswordResetEmailDirect(email) {
+    const apiKey = import.meta.env.VITE_FIREBASE_API_KEY;
+    const continueUrl = `${window.location.origin}/reset-password`;
+
+    const cleanEmail = String(email || "").trim();
+
+    const res = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          requestType: "PASSWORD_RESET",
+          email: cleanEmail,
+          continueUrl,
+        }),
+      }
+    );
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      const message = data?.error?.message || "RESET_PASSWORD_FAILED";
+      throw new Error(message);
+    }
+
+    return data;
   }
 
   function InfoTooltip({ text }) {
@@ -2952,7 +2985,7 @@ ${noteContent}
               style={{
                 ...button,
                 background: "rgba(255,255,255,0.06)",
-                color: "#fff",
+                color: dark ? "rgba(255,255,255,0.88)" : "#1f2937",
                 border: "1px solid rgba(255,255,255,0.08)",
                 flex: 1
               }}
@@ -2961,19 +2994,37 @@ ${noteContent}
             </button>
 
             <div style={{ marginBottom: 10 }}>
-              <div style={{ fontWeight: 900, fontSize: 22, opacity: 0.8 }}>
+              <div
+                style={{
+                  fontWeight: 900,
+                  fontSize: 22,
+                  color: dark ? "#ffffff" : "#111827"
+                }}
+              >
                 {index + 1}/{session.length}
               </div>
 
               {studyMode === "topic" && (
-                <div style={{ marginTop: 6, fontSize: 13, opacity: 0.8 }}>
-                  Sessão do tópico: <strong>{studyTopic}</strong>
+                <div
+                  style={{
+                    marginTop: 6,
+                    fontSize: 13,
+                    color: dark ? "rgba(255,255,255,0.82)" : "#374151"
+                  }}
+                >
+                  Sessão do tópico: <strong style={{ color: dark ? "#ffffff" : "#111827" }}>{studyTopic}</strong>
                 </div>
               )}
 
               {studyMode === "topic" && session[index]?.deckName && (
-                <div style={{ marginTop: 4, fontSize: 12, opacity: 0.7 }}>
-                  Deck: {session[index].deckName}
+                <div
+                  style={{
+                    marginTop: 4,
+                    fontSize: 12,
+                    color: dark ? "rgba(255,255,255,0.72)" : "#4b5563"
+                  }}
+                >
+                  Deck: <strong style={{ color: dark ? "rgba(255,255,255,0.9)" : "#1f2937" }}>{session[index].deckName}</strong>
                 </div>
               )}
             </div>
@@ -2983,7 +3034,7 @@ ${noteContent}
               style={{
                 ...button,
                 background: "rgba(255,255,255,0.06)",
-                color: "#fff",
+                color: dark ? "rgba(255,255,255,0.88)" : "#1f2937",
                 border: "1px solid rgba(255,255,255,0.08)",
                 flex: 1
               }}
@@ -3150,9 +3201,14 @@ ${noteContent}
                 onClick={() => rate(3)}
                 style={{
                   ...button,
-                  background: "rgba(255,255,255,0.06)",
-                  color: "#fff",
-                  border: "1px solid rgba(255,255,255,0.08)"
+                  background: dark
+                    ? "rgba(255,255,255,0.04)"
+                    : "rgba(0,0,0,0.04)",
+                  color: dark ? "#fff" : "#111",
+                  border: dark
+                    ? "1px solid rgba(255,255,255,0.12)"
+                    : "1px solid rgba(0,0,0,0.12)",
+                  boxShadow: "none"
                 }}
               >
                 ⚠️ Difícil
@@ -3162,9 +3218,14 @@ ${noteContent}
                 onClick={() => rate(4)}
                 style={{
                   ...button,
-                  background: "rgba(255,255,255,0.06)",
-                  color: "#fff",
-                  border: "1px solid rgba(255,255,255,0.08)"
+                  background: dark
+                    ? "rgba(255,255,255,0.04)"
+                    : "rgba(0,0,0,0.04)",
+                  color: dark ? "#fff" : "#111",
+                  border: dark
+                    ? "1px solid rgba(255,255,255,0.12)"
+                    : "1px solid rgba(0,0,0,0.12)",
+                  boxShadow: "none"
                 }}
               >
                 👍 Bom
