@@ -221,7 +221,7 @@ export default function App() {
 
   const FREE_NOTES_LIMIT = 10;
 
-  const APP_VERSION = "1.0.1";
+  const APP_VERSION = "1.0.0";
 
   const hasReachedNotesLimit =
     !isPremium && (notes?.length || 0) >= FREE_NOTES_LIMIT;
@@ -2518,6 +2518,8 @@ ${noteContent}
     maxWidth: 420,
     margin: "0 auto",
     padding: 20,
+    paddingTop: "calc(env(safe-area-inset-top) + 20px)",
+    paddingBottom: "calc(env(safe-area-inset-bottom) + 20px)",
     boxSizing: "border-box",
     overflowX: "hidden",
     fontFamily: "'Inter', sans-serif",
