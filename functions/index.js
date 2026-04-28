@@ -629,3 +629,34 @@ exports.stripeWebhook = onRequest(
     }
   }
 );
+exports.createCustomerPortalSession = onCall(
+  {
+    cors: true,
+    secrets: ["STRIPE_SECRET_KEY"],
+  },
+  async (request) => {
+    const uid = request.auth?.uid;
+
+    if (!uid) {
+      throw new HttpsError("unauthenticated", "Usuário não autenticado.");
+    }
+
+    const userDoc = await admin.firestore().collection("users").doc(uid).get();
+    const userData = userDoc.data();
+
+    const customerId = userData?.subscription?.stripeCustomerId;
+
+    if (!customerId) {
+      throw new HttpsError("failed-precondition", "Cliente Stripe não encontrado.");
+    }
+
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+    const session = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: "https://dont-forget-it-khaki.vercel.app/",
+    });
+
+    return { url: session.url };
+  }
+);

@@ -221,7 +221,7 @@ export default function App() {
 
   const FREE_NOTES_LIMIT = 10;
 
-  const APP_VERSION = "1.0.0";
+  const APP_VERSION = "1.0.1";
 
   const hasReachedNotesLimit =
     !isPremium && (notes?.length || 0) >= FREE_NOTES_LIMIT;
@@ -1537,6 +1537,20 @@ ${noteContent}
         )}
       </span>
     );
+  }
+
+  async function handleManageSubscription() {
+    try {
+      showToast("Abrindo gerenciamento da assinatura...");
+
+      const createPortal = httpsCallable(functions, "createCustomerPortalSession");
+      const res = await createPortal();
+
+      window.location.href = res.data.url;
+    } catch (error) {
+      console.error(error);
+      showToast("Não foi possível abrir o gerenciamento da assinatura.", "error");
+    }
   }
 
   useEffect(() => {
@@ -4795,14 +4809,15 @@ ${noteContent}
                   )}
 
                   <button
-                    onClick={() =>
-                      showToast("O gerenciamento da assinatura será liberado em breve.")
-                    }
+                    onClick={handleManageSubscription}
+                    disabled={isCancelScheduled}
                     style={{
                       ...button,
                       width: "100%",
                       background: dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)",
-                      color: dark ? "#fff" : "#111"
+                      color: dark ? "#fff" : "#111",
+                      opacity: isCancelScheduled ? 0.65 : 1,
+                      cursor: isCancelScheduled ? "not-allowed" : "pointer"
                     }}
                   >
                     {isCancelScheduled ? "Cancelamento agendado" : "Gerenciar assinatura"}
@@ -5101,23 +5116,35 @@ ${noteContent}
                 padding: 14,
                 borderRadius: 16,
                 background: dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
-                border: dark ? "1px solid rgba(255,255,255,0.10)" : "1px solid rgba(0,0,0,0.08)"
+                border: dark ? "1px solid rgba(255,255,255,0.10)" : "1px solid rgba(0,0,0,0.08)",
+                opacity: 0.7
               }}
             >
-              <div style={{ fontSize: 12, fontWeight: 800, opacity: 0.75 }}>
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 800,
+                  color: dark ? "rgba(255,255,255,0.8)" : "#374151"
+                }}
+              >
                 🔔 {t("reminder")}
               </div>
 
-              <div style={{ marginTop: 8, fontSize: 14, opacity: 0.8, lineHeight: 1.5 }}>
+              <div
+                style={{
+                  marginTop: 8,
+                  fontSize: 14,
+                  lineHeight: 1.5,
+                  color: dark ? "rgba(255,255,255,0.75)" : "#4b5563"
+                }}
+              >
                 {t("reminderDescription")}
               </div>
 
               <input
                 type="time"
+                disabled
                 value={userData?.notifications?.time || "20:00"}
-                onChange={(e) =>
-                  updateNotificationSettings({ time: e.target.value })
-                }
                 style={{
                   ...input,
                   marginTop: 10,
@@ -5125,35 +5152,36 @@ ${noteContent}
                   maxWidth: "100%",
                   minWidth: 0,
                   boxSizing: "border-box",
-                  display: "block"
+                  display: "block",
+                  cursor: "not-allowed",
+                  opacity: 0.7
                 }}
               />
 
-              {!userData?.notifications?.enabled ? (
-                <button
-                  onClick={enableReminder}
-                  style={{
-                    ...button,
-                    marginTop: 10,
-                    background: "linear-gradient(135deg, #7C5CFF, #5A8BFF)",
-                    color: "#fff"
-                  }}
-                >
-                  {t("activate")}
-                </button>
-              ) : (
-                <button
-                  onClick={() =>
-                    updateNotificationSettings({ enabled: false })
-                  }
-                  style={{
-                    ...button,
-                    marginTop: 10
-                  }}
-                >
-                  {t("deactivate")}
-                </button>
-              )}
+              <button
+                disabled
+                style={{
+                  ...button,
+                  marginTop: 10,
+                  background: dark
+                    ? "rgba(255,255,255,0.08)"
+                    : "rgba(0,0,0,0.06)",
+                  color: dark ? "rgba(255,255,255,0.7)" : "#374151",
+                  cursor: "not-allowed"
+                }}
+              >
+                🔔 Em breve
+              </button>
+
+              <div
+                style={{
+                  marginTop: 8,
+                  fontSize: 12,
+                  color: dark ? "rgba(255,255,255,0.6)" : "#6b7280"
+                }}
+              >
+                Notificações push para lembrar você de estudar chegarão em breve.
+              </div>
             </div>
 
             <div
